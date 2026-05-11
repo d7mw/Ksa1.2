@@ -608,20 +608,60 @@ async def user_tweets(username: str, kind: str = 'posts', user=Depends(optional_
     if not u:
         raise HTTPException(404, 'user_not_found')
     viewer_id = user['id'] if user else None
+
     if kind == 'media':
         cursor = db.tweets.find({'user_id': u['id'], 'image': {'$ne': None}}).sort([('created_at', -1)])
-    elif kind == 'replies':
+        items = await cursor.to_list(200)
+        return await serialize_tweets(items, viewer_id)
+
+    if kind == 'replies':
         cursor = db.tweets.find({'user_id': u['id'], 'parent_id': {'$ne': None}}).sort([('created_at', -1)])
-    elif kind == 'likes':
+        items = await cursor.to_list(200)
+        return await serialize_tweets(items, viewer_id)
+
+    if kind == 'likes':
         likes = await db.likes.find({'user_id': u['id']}).sort([('created_at', -1)]).to_list(200)
         ids = [l['tweet_id'] for l in likes]
         cursor = db.tweets.find({'id': {'$in': ids}})
         items = await cursor.to_list(200)
+        # Preserve like-order
+        order = {tid: i for i, tid in enumerate(ids)}
+        items.sort(key=lambda t: order.get(t['id'], 999999))
         return await serialize_tweets(items, viewer_id)
-    else:
-        cursor = db.tweets.find({'user_id': u['id'], 'parent_id': None}).sort([('created_at', -1)])
-    items = await cursor.to_list(200)
-    return await serialize_tweets(items, viewer_id)
+
+    # kind == 'posts': own tweets + retweets, merged chronologically
+    own_cursor = db.tweets.find({'user_id': u['id'], 'parent_id': None}).sort([('created_at', -1)]).limit(200)
+    own_items = await own_cursor.to_list(200)
+
+    rt_docs = await db.retweets.find({'user_id': u['id']}).sort([('created_at', -1)]).limit(200).to_list(200)
+    rt_tweet_ids = [r['tweet_id'] for r in rt_docs]
+    rt_tweets_by_id = {}
+    if rt_tweet_ids:
+        rt_list = await db.tweets.find({'id': {'$in': rt_tweet_ids}}).to_list(len(rt_tweet_ids))
+        rt_tweets_by_id = {t['id']: t for t in rt_list}
+
+    # Build combined sortable list: (sort_time, tweet_doc, retweeter_or_None)
+    combined = []
+    for t in own_items:
+        combined.append((t['created_at'], t, None))
+    for r in rt_docs:
+        t = rt_tweets_by_id.get(r['tweet_id'])
+        if t:
+            combined.append((r['created_at'], t, u))
+    # Sort by sort_time desc
+    combined.sort(key=lambda x: x[0], reverse=True)
+    combined = combined[:200]
+
+    tweets_list = [c[1] for c in combined]
+    serialized = await serialize_tweets(tweets_list, viewer_id)
+
+    out = []
+    for (sort_time, _t, retweeter), s in zip(combined, serialized):
+        if retweeter:
+            out.append({**s, 'retweeted_by': public_user(retweeter, viewer_id), 'retweeted_at': sort_time})
+        else:
+            out.append(s)
+    return out
 
 
 # ------------- notifications -------------

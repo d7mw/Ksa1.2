@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Layout from '../components/Layout';
 import Tweet from '../components/Tweet';
 import EditProfileModal from '../components/EditProfileModal';
@@ -38,10 +38,21 @@ const Profile = () => {
       .finally(() => setLoading(false));
   }, [targetUsername]);
 
-  useEffect(() => {
+  const refreshTweets = useCallback(() => {
     if (!targetUsername) return;
     usersApi.tweets(targetUsername, tab).then(setTweets).catch(() => setTweets([]));
   }, [targetUsername, tab]);
+
+  useEffect(() => { refreshTweets(); }, [refreshTweets]);
+
+  const handleActionDone = (action) => {
+    // When user toggles retweet/delete on their own profile, refresh feed so
+    // retweets appear/disappear immediately.
+    if (!isMe) return;
+    if (action?.type === 'retweet' || action?.type === 'delete') {
+      refreshTweets();
+    }
+  };
 
   const refreshProfile = () => {
     usersApi.get(targetUsername).then(setProfile).catch(() => {});
@@ -153,7 +164,7 @@ const Profile = () => {
             {lang === 'ar' ? 'لا يوجد محتوى بعد' : 'Nothing here yet'}
           </div>
         ) : (
-          tweets.map((tw) => <Tweet key={tw.id} tweet={tw} onDelete={() => setTweets((ts) => ts.filter((x) => x.id !== tw.id))} />)
+          tweets.map((tw) => <Tweet key={`${tw.id}-${tw.retweeted_by ? 'rt' : 'own'}`} tweet={tw} onDelete={() => setTweets((ts) => ts.filter((x) => x.id !== tw.id))} onActionDone={handleActionDone} />)
         )}
       </div>
 

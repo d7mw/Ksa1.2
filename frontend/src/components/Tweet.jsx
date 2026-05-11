@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { MessageCircle, Repeat2, Heart, BarChart3, Share, MoreHorizontal, Bookmark, Trash2 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
+import { tweetsApi } from '../api';
 
 const formatNum = (n) => {
   if (!n) return 0;
@@ -30,90 +31,181 @@ const VerifiedIcon = () => (
   </svg>
 );
 
-const Tweet = ({ tweet, onDelete }) => {
-  const { lang, user, toggleLike, toggleRetweet, deleteTweet } = useApp();
+const FALLBACK_AVATAR = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><rect width='40' height='40' fill='%231f2a24'/></svg>";
+
+const Tweet = ({ tweet, onDelete, onActionDone }) => {
+  const { lang, user, deleteTweet } = useApp();
   const nav = useNavigate();
   const author = tweet.author || {};
   const canDelete = user && (user.id === tweet.user_id || user.is_admin);
+
+  // Local optimistic state for instant UI feedback
+  const [liked, setLiked] = useState(!!tweet.liked);
+  const [retweeted, setRetweeted] = useState(!!tweet.retweeted);
+  const [likesCount, setLikesCount] = useState(tweet.likes_count || 0);
+  const [retweetsCount, setRetweetsCount] = useState(tweet.retweets_count || 0);
+
+  // Sync when tweet prop changes (e.g. after parent refetch)
+  useEffect(() => {
+    setLiked(!!tweet.liked);
+    setRetweeted(!!tweet.retweeted);
+    setLikesCount(tweet.likes_count || 0);
+    setRetweetsCount(tweet.retweets_count || 0);
+  }, [tweet.id, tweet.liked, tweet.retweeted, tweet.likes_count, tweet.retweets_count]);
 
   const handleClick = (e) => {
     if (e.target.closest('button') || e.target.closest('a')) return;
     nav(`/tweet/${tweet.id}`);
   };
 
+  const stop = (e) => e.stopPropagation();
+
+  const handleLike = async (e) => {
+    stop(e);
+    const next = !liked;
+    setLiked(next);
+    setLikesCount((c) => (next ? c + 1 : Math.max(0, c - 1)));
+    try {
+      await tweetsApi.like(tweet.id);
+      onActionDone?.({ type: 'like', tweetId: tweet.id, liked: next });
+    } catch (err) {
+      setLiked(!next);
+      setLikesCount((c) => (!next ? c + 1 : Math.max(0, c - 1)));
+    }
+  };
+
+  const handleRetweet = async (e) => {
+    stop(e);
+    const next = !retweeted;
+    setRetweeted(next);
+    setRetweetsCount((c) => (next ? c + 1 : Math.max(0, c - 1)));
+    try {
+      await tweetsApi.retweet(tweet.id);
+      onActionDone?.({ type: 'retweet', tweetId: tweet.id, retweeted: next });
+    } catch (err) {
+      setRetweeted(!next);
+      setRetweetsCount((c) => (!next ? c + 1 : Math.max(0, c - 1)));
+    }
+  };
+
   const handleDelete = async (e) => {
-    e.stopPropagation();
+    stop(e);
     if (!window.confirm(lang === 'ar' ? 'حذف التغريدة؟' : 'Delete this post?')) return;
     try {
       await deleteTweet(tweet.id);
       onDelete?.(tweet.id);
+      onActionDone?.({ type: 'delete', tweetId: tweet.id });
     } catch (e) { console.error(e); }
   };
 
+  const goToProfile = (e, username) => {
+    e.stopPropagation();
+    if (username) nav(`/u/${username}`);
+  };
+
   return (
-    <article onClick={handleClick} className="tweet-card fade-in px-3 sm:px-4 py-3 border-b border-zinc-900 cursor-pointer flex gap-3 max-w-full overflow-hidden">
-      <img
-        src={author.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 40 40\'><rect width=\'40\' height=\'40\' fill=\'%231f2a24\'/></svg>'}
-        alt={author.name}
-        className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover flex-shrink-0 bg-zinc-800"
-      />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1 text-sm sm:text-[15px]">
-          <span className="font-bold hover:underline truncate">{author.name}</span>
-          {author.verified && <VerifiedIcon />}
-          <span className="text-zinc-500 truncate hidden xs:inline">@{author.username}</span>
-          <span className="text-zinc-500">·</span>
-          <span className="text-zinc-500 hover:underline whitespace-nowrap">{timeAgo(tweet.created_at, lang)}</span>
-          <div className="ms-auto flex items-center">
-            {canDelete && (
-              <button onClick={handleDelete} className="p-2 rounded-full hover:bg-red-500/10 hover:text-red-500 transition-colors">
-                <Trash2 size={16} className="text-zinc-500" />
-              </button>
-            )}
-            <button onClick={(e) => e.stopPropagation()} className="p-2 rounded-full hover:bg-white/5 transition-colors">
-              <MoreHorizontal size={16} className="text-zinc-500" />
-            </button>
-          </div>
+    <article onClick={handleClick} className="tweet-card fade-in px-3 sm:px-4 py-3 border-b border-zinc-900 cursor-pointer max-w-full overflow-hidden">
+      {tweet.retweeted_by && (
+        <div className="flex items-center gap-2 text-zinc-500 text-xs sm:text-sm mb-2 ps-12 sm:ps-14">
+          <Repeat2 size={14} className="flex-shrink-0" />
+          <Link
+            to={`/u/${tweet.retweeted_by.username}`}
+            onClick={stop}
+            className="hover:underline truncate"
+          >
+            {user && tweet.retweeted_by.id === user.id
+              ? (lang === 'ar' ? 'أنت أعدت النشر' : 'You reposted')
+              : `${tweet.retweeted_by.name} ${lang === 'ar' ? 'أعاد النشر' : 'reposted'}`}
+          </Link>
         </div>
+      )}
 
-        <p className="text-[15px] leading-relaxed text-zinc-100 whitespace-pre-wrap break-words mt-0.5 overflow-hidden">
-          {tweet.content}
-        </p>
+      <div className="flex gap-3">
+        <Link
+          to={author.username ? `/u/${author.username}` : '#'}
+          onClick={stop}
+          className="flex-shrink-0"
+        >
+          <img
+            src={author.avatar || FALLBACK_AVATAR}
+            alt={author.name}
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover bg-zinc-800 hover:opacity-90 transition-opacity"
+          />
+        </Link>
 
-        {tweet.image && (
-          <div className="mt-3 rounded-2xl overflow-hidden border border-zinc-900">
-            <img src={tweet.image} alt="" className="w-full max-h-[500px] object-cover" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1 text-sm sm:text-[15px]">
+            <Link
+              to={author.username ? `/u/${author.username}` : '#'}
+              onClick={stop}
+              className="font-bold hover:underline truncate"
+            >
+              {author.name}
+            </Link>
+            {author.verified && <VerifiedIcon />}
+            <Link
+              to={author.username ? `/u/${author.username}` : '#'}
+              onClick={stop}
+              className="text-zinc-500 truncate hidden xs:inline hover:underline"
+            >
+              @{author.username}
+            </Link>
+            <span className="text-zinc-500">·</span>
+            <span className="text-zinc-500 hover:underline whitespace-nowrap">{timeAgo(tweet.created_at, lang)}</span>
+            <div className="ms-auto flex items-center">
+              {canDelete && (
+                <button onClick={handleDelete} className="p-2 rounded-full hover:bg-red-500/10 hover:text-red-500 transition-colors">
+                  <Trash2 size={16} className="text-zinc-500" />
+                </button>
+              )}
+              <button onClick={stop} className="p-2 rounded-full hover:bg-white/5 transition-colors">
+                <MoreHorizontal size={16} className="text-zinc-500" />
+              </button>
+            </div>
           </div>
-        )}
 
-        <div className="flex items-center justify-between mt-3 max-w-md text-zinc-500 -mx-2">
-          <button
-            onClick={(e) => { e.stopPropagation(); nav(`/tweet/${tweet.id}`); }}
-            className="icon-btn icon-reply flex items-center gap-2 text-sm"
-          >
-            <MessageCircle size={18} />
-            <span>{formatNum(tweet.replies_count)}</span>
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); toggleRetweet(tweet.id); }}
-            className={`icon-btn icon-retweet flex items-center gap-2 text-sm ${tweet.retweeted ? 'text-green-500' : ''}`}
-          >
-            <Repeat2 size={20} />
-            <span>{formatNum(tweet.retweets_count)}</span>
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); toggleLike(tweet.id); }}
-            className={`icon-btn icon-like flex items-center gap-2 text-sm ${tweet.liked ? 'text-pink-500' : ''}`}
-          >
-            <Heart size={18} fill={tweet.liked ? 'currentColor' : 'none'} />
-            <span>{formatNum(tweet.likes_count)}</span>
-          </button>
-          <button onClick={(e) => e.stopPropagation()} className="icon-btn icon-share flex items-center gap-2 text-sm">
-            <BarChart3 size={18} />
-            <span>{formatNum(tweet.views)}</span>
-          </button>
-          <button onClick={(e) => e.stopPropagation()} className="icon-btn icon-share"><Bookmark size={18} /></button>
-          <button onClick={(e) => e.stopPropagation()} className="icon-btn icon-share"><Share size={18} /></button>
+          <p className="text-[15px] leading-relaxed text-zinc-100 whitespace-pre-wrap break-words mt-0.5 overflow-hidden">
+            {tweet.content}
+          </p>
+
+          {tweet.image && (
+            <div className="mt-3 rounded-2xl overflow-hidden border border-zinc-900">
+              <img src={tweet.image} alt="" className="w-full max-h-[500px] object-cover" />
+            </div>
+          )}
+
+          <div className="flex items-center justify-between mt-3 max-w-md text-zinc-500 -mx-2">
+            <button
+              onClick={(e) => { stop(e); nav(`/tweet/${tweet.id}`); }}
+              className="icon-btn icon-reply flex items-center gap-2 text-sm"
+            >
+              <MessageCircle size={18} />
+              <span>{formatNum(tweet.replies_count)}</span>
+            </button>
+            <button
+              onClick={handleRetweet}
+              className={`icon-btn icon-retweet flex items-center gap-2 text-sm ${retweeted ? 'text-green-500' : ''}`}
+              aria-pressed={retweeted}
+              aria-label={retweeted ? (lang === 'ar' ? 'إلغاء إعادة النشر' : 'Undo repost') : (lang === 'ar' ? 'إعادة النشر' : 'Repost')}
+            >
+              <Repeat2 size={20} />
+              <span>{formatNum(retweetsCount)}</span>
+            </button>
+            <button
+              onClick={handleLike}
+              className={`icon-btn icon-like flex items-center gap-2 text-sm ${liked ? 'text-pink-500' : ''}`}
+              aria-pressed={liked}
+            >
+              <Heart size={18} fill={liked ? 'currentColor' : 'none'} />
+              <span>{formatNum(likesCount)}</span>
+            </button>
+            <button onClick={stop} className="icon-btn icon-share flex items-center gap-2 text-sm">
+              <BarChart3 size={18} />
+              <span>{formatNum(tweet.views)}</span>
+            </button>
+            <button onClick={stop} className="icon-btn icon-share"><Bookmark size={18} /></button>
+            <button onClick={stop} className="icon-btn icon-share"><Share size={18} /></button>
+          </div>
         </div>
       </div>
     </article>

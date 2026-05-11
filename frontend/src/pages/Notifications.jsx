@@ -4,7 +4,7 @@ import { useApp } from '../contexts/AppContext';
 import { notificationsApi } from '../api';
 import { t } from '../i18n';
 import { Heart, UserPlus, Repeat2, MessageCircle, Settings, BadgeCheck, Loader2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 
 const typeIcon = {
   like: <Heart size={26} className="text-pink-500 fill-pink-500" />,
@@ -64,9 +64,15 @@ const Notifications = () => {
         <div key={n.id} onClick={() => n.tweet_id && nav(`/tweet/${n.tweet_id}`)} className="flex gap-4 px-4 py-4 border-b border-zinc-900 hover:bg-white/5 cursor-pointer transition-colors">
           <div className="w-8 flex-shrink-0 flex justify-center pt-1">{typeIcon[n.type] || typeIcon.like}</div>
           <div className="flex-1 min-w-0">
-            {n.actor && <img src={n.actor.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 40 40\'><rect width=\'40\' height=\'40\' fill=\'%231f2a24\'/></svg>'} alt="" className="w-9 h-9 rounded-full object-cover mb-2 bg-zinc-800" />}
+            {n.actor && (
+              <Link to={`/u/${n.actor.username}`} onClick={(e) => e.stopPropagation()}>
+                <img src={n.actor.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 40 40\'><rect width=\'40\' height=\'40\' fill=\'%231f2a24\'/></svg>'} alt="" className="w-9 h-9 rounded-full object-cover mb-2 bg-zinc-800 hover:opacity-90 transition-opacity" />
+              </Link>
+            )}
             <p className="text-[15px]">
-              {n.actor && <span className="font-bold">{n.actor.name} </span>}
+              {n.actor && (
+                <Link to={`/u/${n.actor.username}`} onClick={(e) => e.stopPropagation()} className="font-bold hover:underline">{n.actor.name} </Link>
+              )}
               <span className="text-zinc-400">{text(n)}</span>
             </p>
             {n.preview && <p className="text-sm text-zinc-500 mt-1">{n.preview}</p>}

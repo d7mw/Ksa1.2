@@ -309,6 +309,18 @@ backend:
         agent: "testing"
         comment: "All 3 feed tests passed: (1) GET /api/tweets/feed includes retweeted field (bool) for each tweet showing viewer's retweet status, (2) GET /api/users/{username}/tweets includes retweeted field, (3) GET /api/tweets/{id}/replies includes retweeted field. The serialize_tweet function correctly adds retweeted field based on viewer's retweet status."
 
+  - task: "Retweet on Profile Feature (kind=posts)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "All 17 tests passed for retweet-on-profile feature: (1) GET /api/users/{username}/tweets?kind=posts returns user's own tweets + retweets merged chronologically, (2) Retweets include retweeted_by field with complete user info (id, name, username, avatar), (3) Retweets include retweeted_at timestamp, (4) Works for both authenticated and unauthenticated requests, (5) Own tweets do not have retweeted_by field, (6) Unretweet correctly removes tweet from profile, (7) Re-retweet correctly adds tweet back to profile, (8) retweeted field correctly shows viewer's retweet status, (9) User's profile only shows their own tweets and retweets (not others' retweets). Feature working correctly."
+
 frontend:
   - task: "Frontend UI"
     implemented: false
@@ -325,12 +337,12 @@ frontend:
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 3
+  test_sequence: 4
   run_ui: false
 
 test_plan:
   current_focus:
-    - "All backend endpoints tested and passing including retweet, image upload, and retweeted field in feeds"
+    - "All backend endpoints tested and passing including retweet, image upload, retweeted field in feeds, and retweet-on-profile feature"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -342,3 +354,5 @@ agent_communication:
     message: "Completed forgot-password flow testing. All 12 tests passed successfully. Forgot-password endpoints working correctly with proper email enumeration prevention, code validation, attempts limiting, Google user protection, and password reset functionality. No critical issues found."
   - agent: "testing"
     message: "Completed retweet and image upload testing. All 19 tests passed successfully: (1) Retweet endpoint with toggle behavior, notification creation (excluding self-retweets), and 404 for non-existent tweets, (2) Image upload with size validation (413 for >7.5MB), (3) Retweeted field correctly included in feed, user tweets, and replies endpoints. No critical issues found."
+  - agent: "testing"
+    message: "Completed retweet-on-profile feature testing. All 17 tests passed successfully: (1) GET /api/users/{username}/tweets?kind=posts correctly returns user's own tweets + retweets merged chronologically, (2) Retweets include retweeted_by field with complete user info (id, name, username, avatar) and retweeted_at timestamp, (3) Works for both authenticated and unauthenticated requests, (4) Own tweets correctly have no retweeted_by field, (5) Unretweet/re-retweet flow works correctly, (6) retweeted field shows viewer's retweet status, (7) User profiles only show their own content. Feature fully functional. No critical issues found."
