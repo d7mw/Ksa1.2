@@ -82,3 +82,12 @@ memory/test_credentials.md
 android-sdk/-e 
 
 # .env files are intentionally NOT gitignored — required for deployment
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
