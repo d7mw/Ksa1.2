@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, BadgeCheck, Check, Loader2 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { usersApi } from '../api';
+import { getReadableError } from '../utils/errors';
 
 const VerificationModal = ({ open, onClose }) => {
   const { lang } = useApp();
@@ -20,7 +21,7 @@ const VerificationModal = ({ open, onClose }) => {
       setSuccess(true);
       setTimeout(() => onClose?.(true), 1800);
     } catch (err) {
-      setError(err.response?.data?.detail || (lang === 'ar' ? 'تعذر إرسال الطلب' : 'Request failed'));
+      setError(getReadableError(err, lang, lang === 'ar' ? 'تعذر إرسال الطلب' : 'Request failed'));
     } finally { setLoading(false); }
   };
 

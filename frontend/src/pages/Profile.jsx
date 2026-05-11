@@ -81,15 +81,15 @@ const Profile = () => {
       </header>
 
       <div className="relative">
-        <div className="h-48 w-full bg-gradient-to-br from-green-900 to-emerald-700">
+        <div className="h-32 sm:h-48 w-full bg-gradient-to-br from-green-900 to-emerald-700">
           {profile.cover && <img src={profile.cover} alt="" className="w-full h-full object-cover" />}
         </div>
         <img
           src={profile.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 128 128\'><rect width=\'128\' height=\'128\' fill=\'%231f2a24\'/></svg>'}
           alt={profile.name}
-          className="absolute -bottom-16 start-4 w-32 h-32 rounded-full border-4 border-black object-cover bg-zinc-800"
+          className="absolute -bottom-12 sm:-bottom-16 start-4 w-24 h-24 sm:w-32 sm:h-32 rounded-full border-4 border-black object-cover bg-zinc-800"
         />
-        <div className="flex justify-end p-3 gap-2">
+        <div className="flex justify-end p-3 gap-2 flex-wrap">
           {isMe ? (
             <>
               {!profile.verified && !profile.verification_requested && (
@@ -114,7 +114,7 @@ const Profile = () => {
         </div>
       </div>
 
-      <div className="px-4 pt-20 pb-4">
+      <div className="px-4 pt-16 sm:pt-20 pb-4">
         <h2 className="text-xl font-extrabold flex items-center gap-1">
           {profile.name} {profile.verified && <VerifiedIcon />}
         </h2>

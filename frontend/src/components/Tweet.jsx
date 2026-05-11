@@ -51,32 +51,32 @@ const Tweet = ({ tweet, onDelete }) => {
   };
 
   return (
-    <article onClick={handleClick} className="tweet-card fade-in px-4 py-3 border-b border-zinc-900 cursor-pointer flex gap-3">
+    <article onClick={handleClick} className="tweet-card fade-in px-3 sm:px-4 py-3 border-b border-zinc-900 cursor-pointer flex gap-3 max-w-full overflow-hidden">
       <img
         src={author.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 40 40\'><rect width=\'40\' height=\'40\' fill=\'%231f2a24\'/></svg>'}
         alt={author.name}
-        className="w-11 h-11 rounded-full object-cover flex-shrink-0 bg-zinc-800"
+        className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover flex-shrink-0 bg-zinc-800"
       />
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1 text-[15px]">
+        <div className="flex items-center gap-1 text-sm sm:text-[15px]">
           <span className="font-bold hover:underline truncate">{author.name}</span>
           {author.verified && <VerifiedIcon />}
-          <span className="text-zinc-500 truncate">@{author.username}</span>
+          <span className="text-zinc-500 truncate hidden xs:inline">@{author.username}</span>
           <span className="text-zinc-500">·</span>
-          <span className="text-zinc-500 hover:underline">{timeAgo(tweet.created_at, lang)}</span>
+          <span className="text-zinc-500 hover:underline whitespace-nowrap">{timeAgo(tweet.created_at, lang)}</span>
           <div className="ms-auto flex items-center">
             {canDelete && (
               <button onClick={handleDelete} className="p-2 rounded-full hover:bg-red-500/10 hover:text-red-500 transition-colors">
                 <Trash2 size={16} className="text-zinc-500" />
               </button>
             )}
-            <button className="p-2 rounded-full hover:bg-white/5 transition-colors">
+            <button onClick={(e) => e.stopPropagation()} className="p-2 rounded-full hover:bg-white/5 transition-colors">
               <MoreHorizontal size={16} className="text-zinc-500" />
             </button>
           </div>
         </div>
 
-        <p className="text-[15px] leading-relaxed text-zinc-100 whitespace-pre-wrap break-words mt-0.5">
+        <p className="text-[15px] leading-relaxed text-zinc-100 whitespace-pre-wrap break-words mt-0.5 overflow-hidden">
           {tweet.content}
         </p>
 
@@ -86,7 +86,7 @@ const Tweet = ({ tweet, onDelete }) => {
           </div>
         )}
 
-        <div className="flex items-center justify-between mt-3 max-w-md text-zinc-500">
+        <div className="flex items-center justify-between mt-3 max-w-md text-zinc-500 -mx-2">
           <button
             onClick={(e) => { e.stopPropagation(); nav(`/tweet/${tweet.id}`); }}
             className="icon-btn icon-reply flex items-center gap-2 text-sm"

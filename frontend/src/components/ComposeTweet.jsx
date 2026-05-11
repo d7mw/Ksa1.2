@@ -3,6 +3,7 @@ import { Image, Smile, MapPin, Calendar, BarChart2, Globe, X, Loader2 } from 'lu
 import { useApp } from '../contexts/AppContext';
 import { t } from '../i18n';
 import { compressImage } from '../utils/imageCompress';
+import { getReadableError } from '../utils/errors';
 
 const ComposeTweet = ({ parentId, onPosted, placeholder }) => {
   const { lang, user, createTweet } = useApp();
@@ -48,17 +49,16 @@ const ComposeTweet = ({ parentId, onPosted, placeholder }) => {
       if (fileRef.current) fileRef.current.value = '';
       onPosted?.(tw);
     } catch (err) {
-      const code = err.response?.data?.detail;
       const status = err.response?.status;
       let msg;
-      if (code === 'image_too_large' || status === 413) {
+      if (status === 413) {
         msg = lang === 'ar' ? 'الصورة كبيرة جداً، جرّب صورة أصغر' : 'Image too large, try a smaller one';
       } else if (status === 401) {
         msg = lang === 'ar' ? 'انتهت جلستك، سجّل دخول مجدداً' : 'Session expired, sign in again';
       } else if (!err.response) {
         msg = lang === 'ar' ? 'تعذر الاتصال، تحقق من الإنترنت' : 'Network error';
       } else {
-        msg = code || (lang === 'ar' ? 'تعذر النشر' : 'Failed to post');
+        msg = getReadableError(err, lang, lang === 'ar' ? 'تعذر النشر' : 'Failed to post');
       }
       setError(msg);
     } finally {
@@ -71,15 +71,15 @@ const ComposeTweet = ({ parentId, onPosted, placeholder }) => {
   const overLimit = remaining < 0;
 
   return (
-    <div className="flex gap-3 px-4 py-3 border-b border-zinc-900">
-      <img src={user.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 40 40\'><rect width=\'40\' height=\'40\' fill=\'%231f2a24\'/></svg>'} alt={user.name} className="w-11 h-11 rounded-full object-cover flex-shrink-0 bg-zinc-800" />
-      <div className="flex-1">
+    <div className="flex gap-3 px-3 sm:px-4 py-3 border-b border-zinc-900 max-w-full overflow-hidden">
+      <img src={user.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 40 40\'><rect width=\'40\' height=\'40\' fill=\'%231f2a24\'/></svg>'} alt={user.name} className="w-10 h-10 sm:w-11 sm:h-11 rounded-full object-cover flex-shrink-0 bg-zinc-800" />
+      <div className="flex-1 min-w-0">
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
           placeholder={placeholder || t(lang, 'whatsHappening')}
           rows={2}
-          className="w-full bg-transparent text-xl placeholder-zinc-500 resize-none outline-none py-2"
+          className="w-full bg-transparent text-lg sm:text-xl placeholder-zinc-500 resize-none outline-none py-2"
         />
         {image && (
           <div className="relative mt-2 rounded-2xl overflow-hidden border border-zinc-800">

@@ -4,6 +4,7 @@ import { useApp } from '../contexts/AppContext';
 import { t } from '../i18n';
 import { authApi } from '../api';
 import { compressImage } from '../utils/imageCompress';
+import { getReadableError } from '../utils/errors';
 
 const EditProfileModal = ({ open, onClose }) => {
   const { lang, user, updateUser } = useApp();
@@ -93,9 +94,7 @@ const EditProfileModal = ({ open, onClose }) => {
       });
       onClose?.(true);
     } catch (err) {
-      const code = err.response?.data?.detail;
-      if (code === 'username_taken') setError(lang === 'ar' ? 'اسم المستخدم محجوز' : 'Username taken');
-      else setError(code || (lang === 'ar' ? 'تعذر الحفظ' : 'Failed to save'));
+      setError(getReadableError(err, lang, lang === 'ar' ? 'تعذر الحفظ' : 'Failed to save'));
     } finally {
       setLoading(false);
     }

@@ -5,6 +5,7 @@ import { useApp } from '../contexts/AppContext';
 import { t } from '../i18n';
 import { Languages, Eye, EyeOff, ArrowLeft, Mail, Loader2, KeyRound } from 'lucide-react';
 import { authApi } from '../api';
+import { getErrorMessage } from '../utils/errors';
 
 const GoogleIcon = () => (
   <svg viewBox="0 0 48 48" className="w-5 h-5">
@@ -83,7 +84,7 @@ const Login = () => {
       onAuthSuccess(data);
       nav('/home');
     } catch (err) {
-      setError(errMsg(err.response?.data?.detail || 'network'));
+      setError(errMsg(getErrorMessage(err, 'network')));
     } finally {
       setLoading(false);
     }
@@ -106,7 +107,7 @@ const Login = () => {
       });
       setMode('verify');
     } catch (err) {
-      setError(errMsg(err.response?.data?.detail || 'network'));
+      setError(errMsg(getErrorMessage(err, 'network')));
     } finally {
       setLoading(false);
     }
@@ -121,7 +122,7 @@ const Login = () => {
       onAuthSuccess(data);
       nav('/home');
     } catch (err) {
-      setError(errMsg(err.response?.data?.detail || 'network'));
+      setError(errMsg(getErrorMessage(err, 'network')));
     } finally {
       setLoading(false);
     }
@@ -142,7 +143,7 @@ const Login = () => {
         });
       }
     } catch (err) {
-      setError(errMsg(err.response?.data?.detail || 'network'));
+      setError(errMsg(getErrorMessage(err, 'network')));
     } finally { setLoading(false); }
   };
 
@@ -157,7 +158,7 @@ const Login = () => {
         : 'If the email is registered, a reset code is on its way.');
       setMode('forgot-verify');
     } catch (err) {
-      setError(errMsg(err.response?.data?.detail || 'network'));
+      setError(errMsg(getErrorMessage(err, 'network')));
     } finally { setLoading(false); }
   };
 
@@ -174,7 +175,7 @@ const Login = () => {
       onAuthSuccess(data);
       nav('/home');
     } catch (err) {
-      setError(errMsg(err.response?.data?.detail || 'network'));
+      setError(errMsg(getErrorMessage(err, 'network')));
     } finally { setLoading(false); }
   };
 
@@ -192,7 +193,7 @@ const Login = () => {
       onAuthSuccess(data);
       nav('/home');
     } catch (err) {
-      setError(errMsg(err.response?.data?.detail || 'network'));
+      setError(errMsg(getErrorMessage(err, 'network')));
     } finally { setLoading(false); }
   };
 

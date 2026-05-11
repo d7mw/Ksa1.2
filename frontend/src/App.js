@@ -3,6 +3,7 @@ import './App.css';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AppProvider, useApp } from './contexts/AppContext';
 import { Loader2 } from 'lucide-react';
+import ErrorBoundary from './components/ErrorBoundary';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Explore from './pages/Explore';
@@ -51,11 +52,13 @@ function App() {
   useEffect(() => { document.title = 'ksa1'; }, []);
   return (
     <div className="App">
-      <BrowserRouter>
-        <AppProvider>
-          <AppShell />
-        </AppProvider>
-      </BrowserRouter>
+      <ErrorBoundary>
+        <BrowserRouter>
+          <AppProvider>
+            <AppShell />
+          </AppProvider>
+        </BrowserRouter>
+      </ErrorBoundary>
     </div>
   );
 }
