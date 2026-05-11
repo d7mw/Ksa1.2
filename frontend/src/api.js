@@ -55,6 +55,7 @@ export const tweetsApi = {
   replies: (id) => api.get(`/tweets/${id}/replies`).then((r) => r.data),
   delete: (id) => api.delete(`/tweets/${id}`).then((r) => r.data),
   like: (id) => api.post(`/tweets/${id}/like`).then((r) => r.data),
+  retweet: (id) => api.post(`/tweets/${id}/retweet`).then((r) => r.data),
 };
 
 // Notifications

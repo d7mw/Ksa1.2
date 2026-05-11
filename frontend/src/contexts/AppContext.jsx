@@ -95,6 +95,27 @@ export const AppProvider = ({ children }) => {
     }
   };
 
+  const toggleRetweet = async (tweetId) => {
+    setTweets((arr) =>
+      arr.map((t) =>
+        t.id === tweetId
+          ? { ...t, retweeted: !t.retweeted, retweets_count: t.retweeted ? t.retweets_count - 1 : t.retweets_count + 1 }
+          : t
+      )
+    );
+    try {
+      await tweetsApi.retweet(tweetId);
+    } catch (e) {
+      setTweets((arr) =>
+        arr.map((t) =>
+          t.id === tweetId
+            ? { ...t, retweeted: !t.retweeted, retweets_count: t.retweeted ? t.retweets_count - 1 : t.retweets_count + 1 }
+            : t
+        )
+      );
+    }
+  };
+
   const deleteTweet = async (tweetId) => {
     await tweetsApi.delete(tweetId);
     setTweets((arr) => arr.filter((t) => t.id !== tweetId));
@@ -119,6 +140,7 @@ export const AppProvider = ({ children }) => {
         setFeedTab,
         createTweet,
         toggleLike,
+        toggleRetweet,
         deleteTweet,
       }}
     >

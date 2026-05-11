@@ -273,6 +273,42 @@ backend:
         agent: "testing"
         comment: "All 12 forgot-password tests passed: (1) Non-existent email returns ok to avoid enumeration, (2) Registered user can request reset, (3) Reset code stored in MongoDB password_resets collection, (4) Wrong code returns 400 invalid_code, (5) Correct code resets password and returns token, (6) Old password fails after reset, (7) New password works after reset, (8) Google users cannot reset password (no code created), (9) 5 wrong attempts allowed, 6th returns 429 too_many_attempts. POST /api/auth/forgot-password/start and POST /api/auth/forgot-password/verify working correctly."
 
+  - task: "Retweet Endpoint"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "All 7 retweet tests passed: (1) User B retweets User A's tweet returns {retweeted: true}, (2) Retweets count increases to 1 and retweeted field is true, (3) User B unretweets returns {retweeted: false}, (4) Retweets count decreases to 0, (5) User A retweets own tweet does NOT create self-notification, (6) User B retweets A's tweet creates notification for User A with correct actor, (7) Retweeting non-existent tweet returns 404. POST /api/tweets/{tweet_id}/retweet working correctly with proper toggle behavior and notification logic."
+
+  - task: "Tweet Image Upload"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "All 3 image upload tests passed: (1) POST /api/tweets with small base64 image (~5KB) creates tweet with image field, (2) GET /api/tweets/{id} returns tweet with image field intact, (3) POST /api/tweets with large image (>7.5MB) returns 413 image_too_large. Image upload validation and storage working correctly."
+
+  - task: "Retweeted Field in Feeds"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "All 3 feed tests passed: (1) GET /api/tweets/feed includes retweeted field (bool) for each tweet showing viewer's retweet status, (2) GET /api/users/{username}/tweets includes retweeted field, (3) GET /api/tweets/{id}/replies includes retweeted field. The serialize_tweet function correctly adds retweeted field based on viewer's retweet status."
+
 frontend:
   - task: "Frontend UI"
     implemented: false
@@ -289,12 +325,12 @@ frontend:
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: false
 
 test_plan:
   current_focus:
-    - "All backend endpoints tested and passing including forgot-password flow"
+    - "All backend endpoints tested and passing including retweet, image upload, and retweeted field in feeds"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -304,3 +340,5 @@ agent_communication:
     message: "Completed comprehensive backend testing. All 13 test scenarios passed successfully. Backend API is fully functional with proper authentication, authorization, CRUD operations, notifications, admin features, and search. SendGrid email service configured (may fail if sender not verified but endpoint returns ok response). No critical issues found."
   - agent: "testing"
     message: "Completed forgot-password flow testing. All 12 tests passed successfully. Forgot-password endpoints working correctly with proper email enumeration prevention, code validation, attempts limiting, Google user protection, and password reset functionality. No critical issues found."
+  - agent: "testing"
+    message: "Completed retweet and image upload testing. All 19 tests passed successfully: (1) Retweet endpoint with toggle behavior, notification creation (excluding self-retweets), and 404 for non-existent tweets, (2) Image upload with size validation (413 for >7.5MB), (3) Retweeted field correctly included in feed, user tweets, and replies endpoints. No critical issues found."

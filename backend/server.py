@@ -53,6 +53,7 @@ async def ensure_indexes():
     await db.tweets.create_index([('user_id', ASCENDING)])
     await db.follows.create_index([('follower_id', ASCENDING), ('following_id', ASCENDING)], unique=True)
     await db.likes.create_index([('user_id', ASCENDING), ('tweet_id', ASCENDING)], unique=True)
+    await db.retweets.create_index([('user_id', ASCENDING), ('tweet_id', ASCENDING)], unique=True)
     await db.otps.create_index([('expires_at', ASCENDING)], expireAfterSeconds=0)
     await db.otps.create_index([('email', ASCENDING)])
     await db.password_resets.create_index([('expires_at', ASCENDING)], expireAfterSeconds=0)
@@ -62,8 +63,10 @@ async def ensure_indexes():
 async def serialize_tweet(tw: dict, viewer_id: Optional[str]) -> dict:
     author = await db.users.find_one({'id': tw['user_id']})
     liked = False
+    retweeted = False
     if viewer_id:
         liked = bool(await db.likes.find_one({'user_id': viewer_id, 'tweet_id': tw['id']}))
+        retweeted = bool(await db.retweets.find_one({'user_id': viewer_id, 'tweet_id': tw['id']}))
     return {
         'id': tw['id'],
         'user_id': tw['user_id'],
@@ -76,6 +79,7 @@ async def serialize_tweet(tw: dict, viewer_id: Optional[str]) -> dict:
         'replies_count': tw.get('replies_count', 0),
         'views': tw.get('views', 0),
         'liked': liked,
+        'retweeted': retweeted,
         'author': public_user(author, viewer_id) if author else None,
     }
 
@@ -486,6 +490,7 @@ async def delete_tweet(tweet_id: str, user=Depends(current_user)):
     await db.tweets.delete_one({'id': tweet_id})
     await db.tweets.delete_many({'parent_id': tweet_id})
     await db.likes.delete_many({'tweet_id': tweet_id})
+    await db.retweets.delete_many({'tweet_id': tweet_id})
     if tw.get('parent_id'):
         await db.tweets.update_one({'id': tw['parent_id']}, {'$inc': {'replies_count': -1}})
     return {'deleted': True}
@@ -519,6 +524,36 @@ async def like_tweet(tweet_id: str, user=Depends(current_user)):
             'read': False,
         })
     return {'liked': True}
+
+
+@api.post('/tweets/{tweet_id}/retweet')
+async def retweet_tweet(tweet_id: str, user=Depends(current_user)):
+    tw = await db.tweets.find_one({'id': tweet_id})
+    if not tw:
+        raise HTTPException(404, 'tweet_not_found')
+    existing = await db.retweets.find_one({'user_id': user['id'], 'tweet_id': tweet_id})
+    if existing:
+        await db.retweets.delete_one({'_id': existing['_id']})
+        await db.tweets.update_one({'id': tweet_id}, {'$inc': {'retweets_count': -1}})
+        return {'retweeted': False}
+    await db.retweets.insert_one({
+        'id': new_id(),
+        'user_id': user['id'],
+        'tweet_id': tweet_id,
+        'created_at': now_utc(),
+    })
+    await db.tweets.update_one({'id': tweet_id}, {'$inc': {'retweets_count': 1}})
+    if tw['user_id'] != user['id']:
+        await db.notifications.insert_one({
+            'id': new_id(),
+            'type': 'retweet',
+            'recipient_id': tw['user_id'],
+            'actor_id': user['id'],
+            'tweet_id': tweet_id,
+            'created_at': now_utc(),
+            'read': False,
+        })
+    return {'retweeted': True}
 
 
 @api.get('/users/{username}/tweets')
@@ -682,6 +717,7 @@ async def admin_delete_user(user_id: str, _=Depends(require_admin)):
     await db.users.delete_one({'id': user_id})
     await db.tweets.delete_many({'user_id': user_id})
     await db.likes.delete_many({'user_id': user_id})
+    await db.retweets.delete_many({'user_id': user_id})
     await db.follows.delete_many({'$or': [{'follower_id': user_id}, {'following_id': user_id}]})
     await db.notifications.delete_many({'$or': [{'recipient_id': user_id}, {'actor_id': user_id}]})
     return {'deleted': True}
@@ -731,6 +767,7 @@ async def admin_delete_tweet(tweet_id: str, _=Depends(require_admin)):
     await db.tweets.delete_one({'id': tweet_id})
     await db.tweets.delete_many({'parent_id': tweet_id})
     await db.likes.delete_many({'tweet_id': tweet_id})
+    await db.retweets.delete_many({'tweet_id': tweet_id})
     return {'deleted': True}
 
 

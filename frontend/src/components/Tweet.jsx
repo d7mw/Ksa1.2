@@ -31,7 +31,7 @@ const VerifiedIcon = () => (
 );
 
 const Tweet = ({ tweet, onDelete }) => {
-  const { lang, user, toggleLike, deleteTweet } = useApp();
+  const { lang, user, toggleLike, toggleRetweet, deleteTweet } = useApp();
   const nav = useNavigate();
   const author = tweet.author || {};
   const canDelete = user && (user.id === tweet.user_id || user.is_admin);
@@ -87,11 +87,17 @@ const Tweet = ({ tweet, onDelete }) => {
         )}
 
         <div className="flex items-center justify-between mt-3 max-w-md text-zinc-500">
-          <button className="icon-btn icon-reply flex items-center gap-2 text-sm">
+          <button
+            onClick={(e) => { e.stopPropagation(); nav(`/tweet/${tweet.id}`); }}
+            className="icon-btn icon-reply flex items-center gap-2 text-sm"
+          >
             <MessageCircle size={18} />
             <span>{formatNum(tweet.replies_count)}</span>
           </button>
-          <button className="icon-btn icon-retweet flex items-center gap-2 text-sm">
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleRetweet(tweet.id); }}
+            className={`icon-btn icon-retweet flex items-center gap-2 text-sm ${tweet.retweeted ? 'text-green-500' : ''}`}
+          >
             <Repeat2 size={20} />
             <span>{formatNum(tweet.retweets_count)}</span>
           </button>
@@ -102,12 +108,12 @@ const Tweet = ({ tweet, onDelete }) => {
             <Heart size={18} fill={tweet.liked ? 'currentColor' : 'none'} />
             <span>{formatNum(tweet.likes_count)}</span>
           </button>
-          <button className="icon-btn icon-share flex items-center gap-2 text-sm">
+          <button onClick={(e) => e.stopPropagation()} className="icon-btn icon-share flex items-center gap-2 text-sm">
             <BarChart3 size={18} />
             <span>{formatNum(tweet.views)}</span>
           </button>
-          <button className="icon-btn icon-share"><Bookmark size={18} /></button>
-          <button className="icon-btn icon-share"><Share size={18} /></button>
+          <button onClick={(e) => e.stopPropagation()} className="icon-btn icon-share"><Bookmark size={18} /></button>
+          <button onClick={(e) => e.stopPropagation()} className="icon-btn icon-share"><Share size={18} /></button>
         </div>
       </div>
     </article>

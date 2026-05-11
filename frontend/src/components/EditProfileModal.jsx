@@ -3,6 +3,7 @@ import { X, Camera, Loader2 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { t } from '../i18n';
 import { authApi } from '../api';
+import { compressImage } from '../utils/imageCompress';
 
 const EditProfileModal = ({ open, onClose }) => {
   const { lang, user, updateUser } = useApp();
@@ -39,16 +40,25 @@ const EditProfileModal = ({ open, onClose }) => {
 
   const pickImage = (ref) => ref.current?.click();
 
-  const handleFile = (e, key) => {
+  const handleFile = async (e, key) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setError(lang === 'ar' ? 'الحجم الأقصى 5 ميجا' : 'Max 5MB');
+    if (!file.type.startsWith('image/')) {
+      setError(lang === 'ar' ? 'الملف ليس صورة' : 'Not an image');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (ev) => setForm((f) => ({ ...f, [key]: ev.target.result }));
-    reader.readAsDataURL(file);
+    if (file.size > 15 * 1024 * 1024) {
+      setError(lang === 'ar' ? 'الحجم الأقصى 15 ميجا' : 'Max 15MB');
+      return;
+    }
+    setError('');
+    try {
+      const opts = key === 'avatar' ? { maxDimension: 600, targetBytes: 400_000 } : { maxDimension: 1600, targetBytes: 900_000 };
+      const dataUrl = await compressImage(file, opts);
+      setForm((f) => ({ ...f, [key]: dataUrl }));
+    } catch (err) {
+      setError(lang === 'ar' ? 'تعذر معالجة الصورة' : 'Failed to process image');
+    }
   };
 
   const handleUsernameChange = (v) => {
