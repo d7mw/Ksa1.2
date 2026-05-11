@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Layout from '../components/Layout';
 import Tweet from '../components/Tweet';
+import EditProfileModal from '../components/EditProfileModal';
 import { useApp } from '../contexts/AppContext';
 import { t } from '../i18n';
 import { ArrowLeft, Calendar, MapPin } from 'lucide-react';
@@ -18,6 +19,7 @@ const Profile = () => {
   const me = user || getUserById('u_me');
   const myTweets = tweets.filter((tw) => tw.userId === me.id || tw.isMe);
   const [tab, setTab] = useState('posts');
+  const [editOpen, setEditOpen] = useState(false);
 
   return (
     <Layout>
@@ -44,7 +46,12 @@ const Profile = () => {
           className="absolute -bottom-16 start-4 w-32 h-32 rounded-full border-4 border-black object-cover"
         />
         <div className="flex justify-end p-3">
-          <button className="btn-outline px-4 py-1.5 rounded-full font-bold text-sm">{t(lang, 'edit')}</button>
+          <button
+            onClick={() => setEditOpen(true)}
+            className="btn-outline px-4 py-1.5 rounded-full font-bold text-sm"
+          >
+            {t(lang, 'edit')}
+          </button>
         </div>
       </div>
 
@@ -100,6 +107,8 @@ const Profile = () => {
           <div className="text-center py-16 text-zinc-500">{lang === 'ar' ? 'لا توجد ردود.' : 'No replies.'}</div>
         )}
       </div>
+
+      <EditProfileModal open={editOpen} onClose={() => setEditOpen(false)} />
     </Layout>
   );
 };
