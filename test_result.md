@@ -334,6 +334,30 @@ backend:
         agent: "testing"
         comment: "All 7 test scenarios passed successfully for followers/following lists: (1) Created 3 test users via signup flow with OTP from MongoDB, (2) Follow + notification creation working (User A follows User B and User C, notifications created with correct actor details), (3) GET /api/users/{username}/followers returns array with all required fields (id, name, username, avatar, verified, is_following, is_self), works without auth (public), is_self correctly set when viewing as the follower, is_following correctly reflects viewer's follow status, (4) GET /api/users/{username}/following returns array with correct fields, sorted by latest follow first (User C before User B), (5) Unfollow + count update working correctly (unfollow returns {following: false, target_followers_count: 0}, followers/following lists updated correctly), (6) Edge cases handled correctly: GET /api/users/nonexistent/followers returns 404 user_not_found, GET /api/users/nonexistent/following returns 404 user_not_found, User A tries to follow themselves returns 400 cannot_follow_self, banned users correctly filtered from followers/following lists (verified by direct database manipulation), (7) target_followers_count accuracy verified: User A follows User B returns target_followers_count=1, User C follows User B returns target_followers_count=2, User A unfollows User B returns target_followers_count=1. All endpoints working correctly with proper authentication, authorization, field validation, and banned user filtering."
 
+  - task: "Reserved Usernames Validation"
+    implemented: true
+    working: true
+    file: "/app/backend/schemas.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "All reserved username validation tests passed: (1) POST /api/auth/signup/start correctly rejects reserved usernames (admin, home, notifications, API case-insensitive) with 422 validation error mentioning 'reserved', (2) Valid username 'MyApp_2025' correctly accepted (not reserved), (3) POST /api/auth/check-username correctly returns {available: false, reason: 'reserved'} for reserved usernames (admin, explore), (4) Valid username correctly marked as available, (5) PATCH /api/users/me correctly rejects reserved usernames (admin, messages) with 422 validation error, (6) Google OAuth with email='admin_*@example.com' correctly generates non-reserved username (e.g., 'admin_1778515243'), (7) All existing endpoints still work (normal signup, login, GET /users/{username}, GET /users/{username}/followers). Reserved username validation working correctly across all endpoints."
+
+  - task: "Follow Email Notification"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "Follow email notification feature working correctly: (1) User A follows User B via POST /api/users/{username}/follow returns {following: true, target_followers_count: 1} successfully, (2) Email notification triggered in background (fire-and-forget) via asyncio.create_task, (3) No SendGrid errors in backend logs - email service call attempted correctly, (4) Main response not blocked by email sending (correct fire-and-forget implementation), (5) send_new_follower_email function implemented in email_service.py with proper HTML template and SendGrid integration. Feature fully functional."
+
 frontend:
   - task: "Frontend UI"
     implemented: false
@@ -350,12 +374,12 @@ frontend:
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 5
+  test_sequence: 6
   run_ui: false
 
 test_plan:
   current_focus:
-    - "All backend endpoints tested and passing including retweet, image upload, retweeted field in feeds, retweet-on-profile feature, and followers/following lists"
+    - "All backend endpoints tested and passing including retweet, image upload, retweeted field in feeds, retweet-on-profile feature, followers/following lists, reserved usernames validation, and follow email notification"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -371,3 +395,5 @@ agent_communication:
     message: "Completed retweet-on-profile feature testing. All 17 tests passed successfully: (1) GET /api/users/{username}/tweets?kind=posts correctly returns user's own tweets + retweets merged chronologically, (2) Retweets include retweeted_by field with complete user info (id, name, username, avatar) and retweeted_at timestamp, (3) Works for both authenticated and unauthenticated requests, (4) Own tweets correctly have no retweeted_by field, (5) Unretweet/re-retweet flow works correctly, (6) retweeted field shows viewer's retweet status, (7) User profiles only show their own content. Feature fully functional. No critical issues found."
   - agent: "testing"
     message: "Completed followers/following lists testing. All 7 test scenarios passed successfully: (1) Created 3 test users via signup flow with OTP from MongoDB, (2) Follow + notification creation working with correct actor details, (3) GET /api/users/{username}/followers returns array with all required fields (id, name, username, avatar, verified, is_following, is_self), works without auth (public), is_self and is_following correctly set based on viewer, (4) GET /api/users/{username}/following returns array with correct fields sorted by latest follow first, (5) Unfollow + count update working correctly with accurate target_followers_count, (6) Edge cases handled correctly: 404 for nonexistent users, 400 for self-follow, banned users filtered from lists, (7) target_followers_count accuracy verified across multiple follow/unfollow operations. All endpoints working correctly with proper authentication, authorization, field validation, and banned user filtering. No critical issues found."
+  - agent: "testing"
+    message: "Completed reserved usernames and follow email notification testing. All tests passed successfully: (1) Reserved usernames (admin, home, notifications, api, messages, explore, etc.) correctly rejected at signup with 422 validation error mentioning 'reserved', (2) Valid usernames like 'MyApp_2025' correctly accepted, (3) POST /api/auth/check-username correctly returns {available: false, reason: 'reserved'} for reserved usernames, (4) PATCH /api/users/me correctly rejects reserved usernames with 422, (5) Google OAuth correctly generates non-reserved usernames when email prefix is reserved (e.g., admin@example.com gets username 'admin_1778515243'), (6) Follow email notification triggered in background (fire-and-forget) via asyncio.create_task, no SendGrid errors in logs, main response not blocked, (7) All existing endpoints still work correctly. Reserved username validation and follow email notification features fully functional. No critical issues found."

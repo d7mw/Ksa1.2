@@ -68,7 +68,7 @@ const Explore = () => {
         users.length === 0 ? (
           <div className="text-center py-16 text-zinc-500">{lang === 'ar' ? 'لا يوجد أشخاص' : 'No people found'}</div>
         ) : users.map((u) => (
-          <div key={u.id} onClick={() => nav(`/u/${u.username}`)} className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 border-b border-zinc-900 cursor-pointer transition-colors">
+          <div key={u.id} onClick={() => nav(`/${u.username}`)} className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 border-b border-zinc-900 cursor-pointer transition-colors">
             <img src={u.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 40 40\'><rect width=\'40\' height=\'40\' fill=\'%231f2a24\'/></svg>'} alt="" className="w-12 h-12 rounded-full object-cover bg-zinc-800" />
             <div className="flex-1 min-w-0">
               <p className="font-bold text-sm truncate">{u.name}</p>

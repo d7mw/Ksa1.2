@@ -28,6 +28,7 @@ const ERROR_MESSAGES = {
     account_banned: 'الحساب محظور',
     use_google_login: 'استخدم تسجيل Google',
     invalid_format: 'اسم المستخدم: 3-20 حرف (أحرف وأرقام و _)',
+    reserved: 'هذا الاسم محجوز للنظام',
     network: 'تعذر الاتصال بالخادم',
   },
   en: {
@@ -41,6 +42,7 @@ const ERROR_MESSAGES = {
     account_banned: 'Account banned',
     use_google_login: 'Use Google sign in',
     invalid_format: 'Username: 3-20 chars (letters, digits, _)',
+    reserved: 'This username is reserved',
     network: 'Could not reach server',
   },
 };

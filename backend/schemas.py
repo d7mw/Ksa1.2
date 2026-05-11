@@ -11,6 +11,30 @@ def new_id() -> str:
 
 USERNAME_RE = re.compile(r'^[A-Za-z0-9_]{3,20}$')
 
+# Reserved usernames that conflict with app routes or are sensitive.
+# These cannot be used as usernames at signup or via profile update.
+RESERVED_USERNAMES = {
+    'home', 'login', 'logout', 'signin', 'signup', 'register',
+    'explore', 'notifications', 'messages', 'bookmarks', 'profile',
+    'settings', 'admin', 'administrator', 'mod', 'moderator',
+    'tweet', 'tweets', 'post', 'posts', 'status', 'statuses',
+    'api', 'app', 'www', 'mail', 'email', 'support', 'help',
+    'about', 'contact', 'terms', 'privacy', 'policy', 'tos',
+    'search', 'discover', 'trending', 'topic', 'topics', 'tag', 'tags',
+    'user', 'users', 'me', 'you', 'null', 'undefined', 'true', 'false',
+    'ksa1', 'official', 'verified', 'staff', 'team',
+    'u',  # avoid collision with legacy /u/:username route
+}
+
+
+def _validate_username_str(v: str) -> str:
+    v = v.strip().lstrip('@')
+    if not USERNAME_RE.match(v):
+        raise ValueError('username must be 3-20 chars: letters, digits, underscore')
+    if v.lower() in RESERVED_USERNAMES:
+        raise ValueError('username is reserved')
+    return v.lower()
+
 
 class SignupStart(BaseModel):
     name: str = Field(min_length=1, max_length=50)
@@ -20,11 +44,10 @@ class SignupStart(BaseModel):
 
     @field_validator('username')
     @classmethod
-    def validate_username(cls, v: str):
-        v = v.strip().lstrip('@')
-        if not USERNAME_RE.match(v):
-            raise ValueError('username must be 3-20 chars: letters, digits, underscore')
-        return v.lower()
+    def validate_username(cls, v):
+        if v is None:
+            return v
+        return _validate_username_str(v)
 
 
 class SignupVerify(BaseModel):
@@ -66,10 +89,7 @@ class UpdateProfile(BaseModel):
     def validate_username(cls, v):
         if v is None:
             return v
-        v = v.strip().lstrip('@')
-        if not USERNAME_RE.match(v):
-            raise ValueError('username must be 3-20 chars: letters, digits, underscore')
-        return v.lower()
+        return _validate_username_str(v)
 
 
 class TweetCreate(BaseModel):

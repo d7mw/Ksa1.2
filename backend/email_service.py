@@ -70,6 +70,44 @@ def send_password_reset_email(to_email: str, code: str, lang: str = 'ar') -> tup
     return _send(to_email, subject, html)
 
 
+def send_new_follower_email(to_email: str, to_name: str, follower_name: str, follower_username: str, lang: str = 'ar') -> tuple[bool, str]:
+    if not API_KEY or not FROM_EMAIL:
+        return False, 'Email service not configured'
+
+    profile_url = f'https://ksa1.com/{follower_username}'
+
+    if lang == 'ar':
+        subject = f'{follower_name} بدأ بمتابعتك في ksa1'
+        html = f'''
+        <div style="font-family: Tajawal, Arial, sans-serif; max-width:520px; margin:auto; background:#0a100d; color:#e7e9ea; padding:40px; border-radius:16px; direction:rtl;">
+          <h2 style="color:#00a653; margin:0 0 8px;">لديك متابع جديد! 🎉</h2>
+          <p style="color:#cbd5d0; font-size:16px; margin:0 0 16px;">مرحباً {to_name}،</p>
+          <p style="color:#9aa0a6; margin:0 0 24px;">
+            <strong style="color:#e7e9ea;">{follower_name}</strong> (@{follower_username}) بدأ بمتابعتك على ksa1.
+          </p>
+          <a href="{profile_url}" style="display:inline-block; background:#00a653; color:#fff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:bold;">عرض الملف الشخصي</a>
+          <hr style="border:none; border-top:1px solid #1f2a24; margin:24px 0;">
+          <p style="color:#5a635c; font-size:12px;">ksa1 · منصة التغريد السعودية</p>
+          <p style="color:#5a635c; font-size:11px;">لإيقاف هذه الإشعارات، اضبط تفضيلاتك من إعدادات الحساب.</p>
+        </div>'''
+    else:
+        subject = f'{follower_name} started following you on ksa1'
+        html = f'''
+        <div style="font-family: Inter, Arial, sans-serif; max-width:520px; margin:auto; background:#0a100d; color:#e7e9ea; padding:40px; border-radius:16px;">
+          <h2 style="color:#00a653; margin:0 0 8px;">You have a new follower! 🎉</h2>
+          <p style="color:#cbd5d0; font-size:16px; margin:0 0 16px;">Hi {to_name},</p>
+          <p style="color:#9aa0a6; margin:0 0 24px;">
+            <strong style="color:#e7e9ea;">{follower_name}</strong> (@{follower_username}) started following you on ksa1.
+          </p>
+          <a href="{profile_url}" style="display:inline-block; background:#00a653; color:#fff; text-decoration:none; padding:12px 28px; border-radius:9999px; font-weight:bold;">View profile</a>
+          <hr style="border:none; border-top:1px solid #1f2a24; margin:24px 0;">
+          <p style="color:#5a635c; font-size:12px;">ksa1 · Saudi microblogging platform</p>
+          <p style="color:#5a635c; font-size:11px;">To unsubscribe, adjust preferences in your account settings.</p>
+        </div>'''
+
+    return _send(to_email, subject, html)
+
+
 def _send(to_email: str, subject: str, html: str) -> tuple[bool, str]:
     try:
         msg = Mail(from_email=(FROM_EMAIL, FROM_NAME), to_emails=to_email, subject=subject, html_content=html)

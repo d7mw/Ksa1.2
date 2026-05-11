@@ -100,7 +100,7 @@ const Tweet = ({ tweet, onDelete, onActionDone }) => {
 
   const goToProfile = (e, username) => {
     e.stopPropagation();
-    if (username) nav(`/u/${username}`);
+    if (username) nav(`/${username}`);
   };
 
   return (
@@ -109,7 +109,7 @@ const Tweet = ({ tweet, onDelete, onActionDone }) => {
         <div className="flex items-center gap-2 text-zinc-500 text-xs sm:text-sm mb-2 ps-12 sm:ps-14">
           <Repeat2 size={14} className="flex-shrink-0" />
           <Link
-            to={`/u/${tweet.retweeted_by.username}`}
+            to={`/${tweet.retweeted_by.username}`}
             onClick={stop}
             className="hover:underline truncate"
           >
@@ -122,7 +122,7 @@ const Tweet = ({ tweet, onDelete, onActionDone }) => {
 
       <div className="flex gap-3">
         <Link
-          to={author.username ? `/u/${author.username}` : '#'}
+          to={author.username ? `/${author.username}` : '#'}
           onClick={stop}
           className="flex-shrink-0"
         >
@@ -136,7 +136,7 @@ const Tweet = ({ tweet, onDelete, onActionDone }) => {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1 text-sm sm:text-[15px]">
             <Link
-              to={author.username ? `/u/${author.username}` : '#'}
+              to={author.username ? `/${author.username}` : '#'}
               onClick={stop}
               className="font-bold hover:underline truncate"
             >
@@ -144,7 +144,7 @@ const Tweet = ({ tweet, onDelete, onActionDone }) => {
             </Link>
             {author.verified && <VerifiedIcon />}
             <Link
-              to={author.username ? `/u/${author.username}` : '#'}
+              to={author.username ? `/${author.username}` : '#'}
               onClick={stop}
               className="text-zinc-500 truncate hidden xs:inline hover:underline"
             >

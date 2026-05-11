@@ -4,11 +4,13 @@ import Tweet from '../components/Tweet';
 import EditProfileModal from '../components/EditProfileModal';
 import VerificationModal from '../components/VerificationModal';
 import FollowListModal from '../components/FollowListModal';
+import UserNotFound from '../components/UserNotFound';
 import { useApp } from '../contexts/AppContext';
 import { t } from '../i18n';
-import { ArrowLeft, Calendar, MapPin, BadgeCheck, Clock } from 'lucide-react';
+import { ArrowLeft, Calendar, MapPin, BadgeCheck, Clock, Loader2 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { usersApi } from '../api';
+import { isReservedPath, isValidUsernameFormat } from '../utils/reservedPaths';
 
 const VerifiedIcon = ({ size = 20 }) => (
   <svg viewBox="0 0 24 24" className="verified-badge fill-current flex-shrink-0" width={size} height={size}>
@@ -17,7 +19,8 @@ const VerifiedIcon = ({ size = 20 }) => (
 );
 
 const Profile = () => {
-  const { username: urlUsername } = useParams();
+  const params = useParams();
+  const urlUsername = params.username || params.handle;
   const { lang, user, setUser } = useApp();
   const nav = useNavigate();
   const [profile, setProfile] = useState(null);
@@ -28,17 +31,24 @@ const Profile = () => {
   const [followListMode, setFollowListMode] = useState(null); // 'followers' | 'following' | null
   const [loading, setLoading] = useState(true);
 
-  const isMe = !urlUsername || (user && urlUsername === user.username);
-  const targetUsername = urlUsername || user?.username;
+  const isMe = !urlUsername || (user && urlUsername.toLowerCase() === user.username);
+  const targetUsername = urlUsername ? urlUsername.toLowerCase() : user?.username;
+
+  // Reject invalid handles & reserved paths at this layer too (defense-in-depth)
+  const invalidHandle = !!urlUsername && (isReservedPath(urlUsername) || !isValidUsernameFormat(urlUsername));
 
   useEffect(() => {
-    if (!targetUsername) return;
+    if (!targetUsername || invalidHandle) {
+      setLoading(false);
+      setProfile(null);
+      return;
+    }
     setLoading(true);
     usersApi.get(targetUsername)
       .then((p) => setProfile(p))
       .catch(() => setProfile(null))
       .finally(() => setLoading(false));
-  }, [targetUsername]);
+  }, [targetUsername, invalidHandle]);
 
   const refreshTweets = useCallback(() => {
     if (!targetUsername) return;
@@ -116,10 +126,16 @@ const Profile = () => {
   };
 
   if (loading) {
-    return <Layout><div className="py-20 text-center text-zinc-500">{lang === 'ar' ? 'جاري التحميل...' : 'Loading...'}</div></Layout>;
+    return (
+      <Layout>
+        <div className="min-h-[50vh] flex items-center justify-center py-20">
+          <Loader2 className="animate-spin text-green-500" size={32} />
+        </div>
+      </Layout>
+    );
   }
   if (!profile) {
-    return <Layout><div className="py-20 text-center text-zinc-500">{lang === 'ar' ? 'الحساب غير موجود' : 'Account not found'}</div></Layout>;
+    return <UserNotFound handle={urlUsername} />;
   }
 
   return (

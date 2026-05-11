@@ -39,7 +39,7 @@ const FollowListModal = ({ open, onClose, username, mode, onFollowChange }) => {
 
   const onClickUser = (u) => {
     onClose?.();
-    nav(`/u/${u.username}`);
+    nav(`/${u.username}`);
   };
 
   const toggleFollow = async (u) => {
@@ -99,7 +99,7 @@ const FollowListModal = ({ open, onClose, username, mode, onFollowChange }) => {
                 className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 cursor-pointer transition-colors border-b border-zinc-900"
               >
                 <Link
-                  to={`/u/${u.username}`}
+                  to={`/${u.username}`}
                   onClick={(e) => { e.stopPropagation(); onClose?.(); }}
                   className="flex-shrink-0"
                 >

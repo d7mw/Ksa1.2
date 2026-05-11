@@ -1,395 +1,351 @@
 #!/usr/bin/env python3
 """
-Backend API Testing for ksa1 - Forgot Password Flow
-Tests all forgot-password endpoints with comprehensive scenarios
+Backend API tests for ksa1 - Reserved Usernames and Follow Email Notification
 """
-
 import requests
-import sys
+import time
 from pymongo import MongoClient
-from datetime import datetime, timezone
 
-# Configuration
-BACKEND_URL = "https://social-feed-269.preview.emergentagent.com/api"
+BASE_URL = "https://social-feed-269.preview.emergentagent.com/api"
 MONGO_URL = "mongodb://localhost:27017"
 DB_NAME = "test_database"
 
-# MongoDB client
+# Connect to MongoDB
 mongo_client = MongoClient(MONGO_URL)
 db = mongo_client[DB_NAME]
 
-# Test results tracking
-tests_passed = 0
-tests_failed = 0
-test_results = []
-
-def log_test(name, passed, details=""):
-    global tests_passed, tests_failed
-    if passed:
-        tests_passed += 1
-        status = "✅ PASS"
-    else:
-        tests_failed += 1
-        status = "❌ FAIL"
+def test_reserved_usernames_at_signup():
+    """Test 1: Reserved usernames rejected at signup"""
+    print("\n=== Test 1: Reserved usernames rejected at signup ===")
     
-    result = f"{status}: {name}"
-    if details:
-        result += f"\n    {details}"
-    test_results.append(result)
-    print(result)
-
-def test_forgot_password_nonexistent_email():
-    """Test 1: forgot-password/start with non-existent email should return ok"""
-    print("\n=== Test 1: Forgot Password Start - Non-existent Email ===")
+    reserved_tests = [
+        ("admin", "admin@test.com", "Admin123!"),
+        ("home", "home@test.com", "Home123!"),
+        ("notifications", "notif@test.com", "Notif123!"),
+        ("API", "api@test.com", "Api123!"),  # case insensitive
+    ]
     
-    response = requests.post(
-        f"{BACKEND_URL}/auth/forgot-password/start",
-        json={"email": "nonexistent@example.com"}
-    )
-    
-    if response.status_code == 200 and response.json().get("status") == "ok":
-        log_test("Forgot password start with non-existent email", True, 
-                 "Returns {status: 'ok'} to avoid email enumeration")
-        return True
-    else:
-        log_test("Forgot password start with non-existent email", False,
-                 f"Expected 200 with status=ok, got {response.status_code}: {response.text}")
-        return False
-
-def register_test_user(email, username, password):
-    """Helper: Register a user via signup flow"""
-    print(f"\n=== Registering user: {email} ===")
-    
-    # Step 1: Start signup
-    response = requests.post(
-        f"{BACKEND_URL}/auth/signup/start",
-        json={
-            "name": "Test User",
+    for username, email, password in reserved_tests:
+        payload = {
+            "name": f"Test {username}",
             "username": username,
             "email": email,
             "password": password
         }
-    )
-    
-    if response.status_code != 200:
-        print(f"❌ Signup start failed: {response.status_code} - {response.text}")
-        return None
-    
-    print(f"✅ Signup started for {email}")
-    
-    # Step 2: Get OTP from MongoDB
-    otp_record = db.otps.find_one({"email": email})
-    if not otp_record:
-        print(f"❌ No OTP found in MongoDB for {email}")
-        return None
-    
-    code = otp_record["code"]
-    print(f"✅ Retrieved OTP from MongoDB: {code}")
-    
-    # Step 3: Verify OTP
-    response = requests.post(
-        f"{BACKEND_URL}/auth/signup/verify",
-        json={
-            "email": email,
-            "code": code
-        }
-    )
-    
-    if response.status_code != 200:
-        print(f"❌ Signup verify failed: {response.status_code} - {response.text}")
-        return None
-    
-    data = response.json()
-    print(f"✅ User registered successfully: {data['user']['username']}")
-    return data
-
-def test_forgot_password_registered_user():
-    """Test 2-3: Register user and test forgot-password/start"""
-    print("\n=== Test 2-3: Register User and Forgot Password Start ===")
-    
-    email = "forgottest@example.com"
-    username = "forgottest"
-    password = "oldpass123"
-    
-    # Clean up any existing user/otp/reset
-    db.users.delete_many({"email": email})
-    db.otps.delete_many({"email": email})
-    db.password_resets.delete_many({"email": email})
-    
-    # Register user
-    user_data = register_test_user(email, username, password)
-    if not user_data:
-        log_test("Register test user for forgot password", False, "Failed to register user")
-        return None, None
-    
-    log_test("Register test user for forgot password", True, f"User {username} registered")
-    
-    # Test forgot-password/start
-    response = requests.post(
-        f"{BACKEND_URL}/auth/forgot-password/start",
-        json={"email": email}
-    )
-    
-    if response.status_code == 200 and response.json().get("status") == "ok":
-        log_test("Forgot password start with registered email", True, "Returns {status: 'ok'}")
-        return email, password
-    else:
-        log_test("Forgot password start with registered email", False,
-                 f"Expected 200 with status=ok, got {response.status_code}: {response.text}")
-        return None, None
-
-def test_forgot_password_verify_flow(email, old_password):
-    """Test 4-6: Verify flow with wrong/correct code"""
-    print("\n=== Test 4-6: Forgot Password Verify Flow ===")
-    
-    # Test 4: Check MongoDB for reset code
-    reset_record = db.password_resets.find_one({"email": email})
-    if not reset_record:
-        log_test("Check MongoDB for password reset code", False, "No reset code found in password_resets collection")
-        return False
-    
-    correct_code = reset_record["code"]
-    log_test("Check MongoDB for password reset code", True, f"Found reset code: {correct_code}")
-    
-    # Test 5: Verify with wrong code
-    response = requests.post(
-        f"{BACKEND_URL}/auth/forgot-password/verify",
-        json={
-            "email": email,
-            "code": "000000",
-            "new_password": "newpass456"
-        }
-    )
-    
-    if response.status_code == 400 and "invalid_code" in response.text:
-        log_test("Forgot password verify with wrong code", True, "Returns 400 invalid_code")
-    else:
-        log_test("Forgot password verify with wrong code", False,
-                 f"Expected 400 invalid_code, got {response.status_code}: {response.text}")
-    
-    # Test 6: Verify with correct code
-    new_password = "newpass456"
-    response = requests.post(
-        f"{BACKEND_URL}/auth/forgot-password/verify",
-        json={
-            "email": email,
-            "code": correct_code,
-            "new_password": new_password
-        }
-    )
-    
-    if response.status_code == 200:
-        data = response.json()
-        if "token" in data and "user" in data:
-            log_test("Forgot password verify with correct code", True, 
-                     "Returns token and user, password reset successful")
-            return new_password
+        resp = requests.post(f"{BASE_URL}/auth/signup/start", json=payload)
+        if resp.status_code == 422:
+            detail = resp.json().get('detail', [])
+            if isinstance(detail, list) and len(detail) > 0:
+                error_msg = detail[0].get('msg', '')
+                if 'reserved' in error_msg.lower():
+                    print(f"✅ username='{username}' correctly rejected with 422 (reserved)")
+                else:
+                    print(f"⚠️  username='{username}' rejected with 422 but message doesn't mention 'reserved': {error_msg}")
+            else:
+                print(f"✅ username='{username}' correctly rejected with 422")
         else:
-            log_test("Forgot password verify with correct code", False,
-                     f"Missing token or user in response: {data}")
-            return None
+            print(f"❌ username='{username}' should fail with 422 but got {resp.status_code}: {resp.text}")
+    
+    # Test valid username (not reserved)
+    valid_payload = {
+        "name": "Valid User",
+        "username": "MyApp_2025",
+        "email": f"validuser_{int(time.time())}@test.com",
+        "password": "Valid123!"
+    }
+    resp = requests.post(f"{BASE_URL}/auth/signup/start", json=valid_payload)
+    if resp.status_code == 200:
+        print(f"✅ username='MyApp_2025' correctly accepted (not reserved)")
     else:
-        log_test("Forgot password verify with correct code", False,
-                 f"Expected 200, got {response.status_code}: {response.text}")
-        return None
+        print(f"❌ username='MyApp_2025' should pass but got {resp.status_code}: {resp.text}")
 
-def test_login_after_reset(email, old_password, new_password):
-    """Test 7-8: Login with old password (should fail) and new password (should succeed)"""
-    print("\n=== Test 7-8: Login After Password Reset ===")
+
+def test_reserved_usernames_at_check_username():
+    """Test 2: Reserved usernames rejected at check-username"""
+    print("\n=== Test 2: Reserved usernames rejected at check-username ===")
     
-    # Test 7: Login with old password
-    response = requests.post(
-        f"{BACKEND_URL}/auth/login",
-        json={
-            "email": email,
-            "password": old_password
-        }
-    )
-    
-    if response.status_code == 401 and "invalid_credentials" in response.text:
-        log_test("Login with old password after reset", True, "Returns 401 invalid_credentials")
-    else:
-        log_test("Login with old password after reset", False,
-                 f"Expected 401 invalid_credentials, got {response.status_code}: {response.text}")
-    
-    # Test 8: Login with new password
-    response = requests.post(
-        f"{BACKEND_URL}/auth/login",
-        json={
-            "email": email,
-            "password": new_password
-        }
-    )
-    
-    if response.status_code == 200:
-        data = response.json()
-        if "token" in data:
-            log_test("Login with new password after reset", True, "Returns 200 with token")
-            return True
+    # Test reserved usernames
+    reserved_tests = ["admin", "explore"]
+    for username in reserved_tests:
+        payload = {"username": username}
+        resp = requests.post(f"{BASE_URL}/auth/check-username", json=payload)
+        if resp.status_code == 200:
+            data = resp.json()
+            if not data.get('available') and data.get('reason') == 'reserved':
+                print(f"✅ username='{username}' correctly marked as unavailable (reserved)")
+            else:
+                print(f"❌ username='{username}' should be unavailable with reason='reserved' but got: {data}")
         else:
-            log_test("Login with new password after reset", False, f"Missing token in response: {data}")
-            return False
+            print(f"❌ check-username for '{username}' failed with {resp.status_code}: {resp.text}")
+    
+    # Test valid username
+    valid_username = f"validname_{int(time.time())}"
+    payload = {"username": valid_username}
+    resp = requests.post(f"{BASE_URL}/auth/check-username", json=payload)
+    if resp.status_code == 200:
+        data = resp.json()
+        if data.get('available'):
+            print(f"✅ username='{valid_username}' correctly marked as available")
+        else:
+            print(f"❌ username='{valid_username}' should be available but got: {data}")
     else:
-        log_test("Login with new password after reset", False,
-                 f"Expected 200, got {response.status_code}: {response.text}")
-        return False
+        print(f"❌ check-username for '{valid_username}' failed with {resp.status_code}: {resp.text}")
 
-def test_google_user_password_reset():
-    """Test 9: Google user cannot reset password"""
-    print("\n=== Test 9: Google User Password Reset ===")
+
+def test_reserved_usernames_at_profile_update():
+    """Test 3: Reserved usernames rejected at profile update"""
+    print("\n=== Test 3: Reserved usernames rejected at profile update ===")
     
-    email = "googletest@example.com"
+    # Create a valid user first
+    timestamp = int(time.time()) % 100000  # Keep it short
+    email = f"prof{timestamp}@test.com"
+    username = f"prof{timestamp}"
+    password = "Profile123!"
     
-    # Clean up
-    db.users.delete_many({"email": email})
-    db.password_resets.delete_many({"email": email})
+    # Signup start
+    signup_payload = {
+        "name": "Profile Test User",
+        "username": username,
+        "email": email,
+        "password": password
+    }
+    resp = requests.post(f"{BASE_URL}/auth/signup/start", json=signup_payload)
+    if resp.status_code != 200:
+        print(f"❌ Failed to start signup: {resp.status_code} {resp.text}")
+        return
     
-    # Register via Google
-    response = requests.post(
-        f"{BACKEND_URL}/auth/google",
-        json={
-            "name": "Google Test User",
-            "email": email,
-            "avatar": ""
+    # Get OTP from MongoDB
+    otp_doc = db.otps.find_one({"email": email})
+    if not otp_doc:
+        print(f"❌ OTP not found in MongoDB for {email}")
+        return
+    
+    otp_code = otp_doc['code']
+    
+    # Verify signup
+    verify_payload = {
+        "email": email,
+        "code": otp_code
+    }
+    resp = requests.post(f"{BASE_URL}/auth/signup/verify", json=verify_payload)
+    if resp.status_code != 200:
+        print(f"❌ Failed to verify signup: {resp.status_code} {resp.text}")
+        return
+    
+    token = resp.json()['token']
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # Try to update to reserved usernames
+    reserved_tests = ["admin", "messages"]
+    for reserved_username in reserved_tests:
+        update_payload = {"username": reserved_username}
+        resp = requests.patch(f"{BASE_URL}/users/me", json=update_payload, headers=headers)
+        if resp.status_code == 422:
+            detail = resp.json().get('detail', [])
+            if isinstance(detail, list) and len(detail) > 0:
+                error_msg = detail[0].get('msg', '')
+                if 'reserved' in error_msg.lower():
+                    print(f"✅ PATCH /users/me with username='{reserved_username}' correctly rejected with 422 (reserved)")
+                else:
+                    print(f"⚠️  PATCH /users/me with username='{reserved_username}' rejected with 422 but message doesn't mention 'reserved': {error_msg}")
+            else:
+                print(f"✅ PATCH /users/me with username='{reserved_username}' correctly rejected with 422")
+        else:
+            print(f"❌ PATCH /users/me with username='{reserved_username}' should fail with 422 but got {resp.status_code}: {resp.text}")
+
+
+def test_google_oauth_reserved_username():
+    """Test 4: Google OAuth picks non-reserved username"""
+    print("\n=== Test 4: Google OAuth picks non-reserved username ===")
+    
+    # Test with admin@example.com
+    timestamp = int(time.time())
+    payload = {
+        "name": "Admin User",
+        "email": f"admin_{timestamp}@example.com",
+        "avatar": ""
+    }
+    resp = requests.post(f"{BASE_URL}/auth/google", json=payload)
+    if resp.status_code == 200:
+        data = resp.json()
+        username = data['user']['username']
+        
+        # Check if username is NOT in reserved list
+        reserved_usernames = {
+            'home', 'login', 'logout', 'signin', 'signup', 'register',
+            'explore', 'notifications', 'messages', 'bookmarks', 'profile',
+            'settings', 'admin', 'administrator', 'mod', 'moderator',
+            'tweet', 'tweets', 'post', 'posts', 'status', 'statuses',
+            'api', 'app', 'www', 'mail', 'email', 'support', 'help',
+            'about', 'contact', 'terms', 'privacy', 'policy', 'tos',
+            'search', 'discover', 'trending', 'topic', 'topics', 'tag', 'tags',
+            'user', 'users', 'me', 'you', 'null', 'undefined', 'true', 'false',
+            'ksa1', 'official', 'verified', 'staff', 'team', 'u',
         }
-    )
-    
-    if response.status_code != 200:
-        log_test("Register Google user", False, f"Failed to register: {response.status_code} - {response.text}")
-        return False
-    
-    log_test("Register Google user", True, "Google user registered successfully")
-    
-    # Try forgot-password/start
-    response = requests.post(
-        f"{BACKEND_URL}/auth/forgot-password/start",
-        json={"email": email}
-    )
-    
-    if response.status_code != 200 or response.json().get("status") != "ok":
-        log_test("Forgot password start for Google user", False,
-                 f"Expected 200 with status=ok, got {response.status_code}: {response.text}")
-        return False
-    
-    # Check that NO reset code was created
-    reset_record = db.password_resets.find_one({"email": email})
-    if reset_record:
-        log_test("Google user password reset prevention", False,
-                 "Reset code was created for Google user (should not happen)")
-        return False
+        
+        if username.lower() not in reserved_usernames:
+            print(f"✅ Google OAuth with email='admin_{timestamp}@example.com' generated non-reserved username: '{username}'")
+        else:
+            print(f"❌ Google OAuth generated reserved username: '{username}'")
     else:
-        log_test("Google user password reset prevention", True,
-                 "No reset code created for Google user, returns ok to avoid enumeration")
-        return True
+        print(f"❌ Google OAuth failed with {resp.status_code}: {resp.text}")
 
-def test_attempts_limit():
-    """Test 10: Test 5 wrong attempts, 6th should return 429"""
-    print("\n=== Test 10: Password Reset Attempts Limit ===")
+
+def test_follow_email_notification():
+    """Test 5: Follow email notification triggered"""
+    print("\n=== Test 5: Follow email notification triggered ===")
     
-    email = "attemptstest@example.com"
-    username = "attemptstest"
-    password = "testpass123"
+    # Create user A
+    timestamp = int(time.time()) % 100000  # Keep it short
+    email_a = f"usera{timestamp}@test.com"
+    username_a = f"usera{timestamp}"
+    password_a = "UserA123!"
     
-    # Clean up
-    db.users.delete_many({"email": email})
-    db.otps.delete_many({"email": email})
-    db.password_resets.delete_many({"email": email})
+    signup_payload_a = {
+        "name": "User A",
+        "username": username_a,
+        "email": email_a,
+        "password": password_a
+    }
+    resp = requests.post(f"{BASE_URL}/auth/signup/start", json=signup_payload_a)
+    if resp.status_code != 200:
+        print(f"❌ Failed to start signup for User A: {resp.status_code} {resp.text}")
+        return
     
-    # Register user
-    user_data = register_test_user(email, username, password)
-    if not user_data:
-        log_test("Register user for attempts limit test", False, "Failed to register user")
-        return False
+    otp_doc_a = db.otps.find_one({"email": email_a})
+    if not otp_doc_a:
+        print(f"❌ OTP not found for User A")
+        return
     
-    log_test("Register user for attempts limit test", True, f"User {username} registered")
+    verify_payload_a = {"email": email_a, "code": otp_doc_a['code']}
+    resp = requests.post(f"{BASE_URL}/auth/signup/verify", json=verify_payload_a)
+    if resp.status_code != 200:
+        print(f"❌ Failed to verify User A: {resp.status_code} {resp.text}")
+        return
     
-    # Request password reset
-    response = requests.post(
-        f"{BACKEND_URL}/auth/forgot-password/start",
-        json={"email": email}
-    )
+    token_a = resp.json()['token']
     
-    if response.status_code != 200:
-        log_test("Request password reset for attempts test", False,
-                 f"Failed to start reset: {response.status_code} - {response.text}")
-        return False
+    # Create user B
+    email_b = f"userb{timestamp}@test.com"
+    username_b = f"userb{timestamp}"
+    password_b = "UserB123!"
     
-    # Make 5 wrong attempts
-    for i in range(1, 6):
-        response = requests.post(
-            f"{BACKEND_URL}/auth/forgot-password/verify",
-            json={
-                "email": email,
-                "code": "000000",
-                "new_password": "newpass123"
-            }
-        )
-        print(f"  Attempt {i}: {response.status_code} - {response.json().get('detail', 'N/A')}")
+    signup_payload_b = {
+        "name": "User B",
+        "username": username_b,
+        "email": email_b,
+        "password": password_b
+    }
+    resp = requests.post(f"{BASE_URL}/auth/signup/start", json=signup_payload_b)
+    if resp.status_code != 200:
+        print(f"❌ Failed to start signup for User B: {resp.status_code} {resp.text}")
+        return
     
-    # 6th attempt should return 429
-    response = requests.post(
-        f"{BACKEND_URL}/auth/forgot-password/verify",
-        json={
-            "email": email,
-            "code": "000000",
-            "new_password": "newpass123"
-        }
-    )
+    otp_doc_b = db.otps.find_one({"email": email_b})
+    if not otp_doc_b:
+        print(f"❌ OTP not found for User B")
+        return
     
-    if response.status_code == 429 and "too_many_attempts" in response.text:
-        log_test("Password reset attempts limit", True, "6th attempt returns 429 too_many_attempts")
-        return True
+    verify_payload_b = {"email": email_b, "code": otp_doc_b['code']}
+    resp = requests.post(f"{BASE_URL}/auth/signup/verify", json=verify_payload_b)
+    if resp.status_code != 200:
+        print(f"❌ Failed to verify User B: {resp.status_code} {resp.text}")
+        return
+    
+    # User A follows User B
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+    resp = requests.post(f"{BASE_URL}/users/{username_b}/follow", headers=headers_a)
+    if resp.status_code == 200:
+        data = resp.json()
+        if data.get('following') and data.get('target_followers_count') == 1:
+            print(f"✅ User A followed User B successfully: {data}")
+            print(f"   Email notification should be triggered in background (fire-and-forget)")
+            print(f"   Check backend logs for SendGrid call (should NOT contain error in main response)")
+        else:
+            print(f"❌ Follow response unexpected: {data}")
     else:
-        log_test("Password reset attempts limit", False,
-                 f"Expected 429 too_many_attempts, got {response.status_code}: {response.text}")
-        return False
+        print(f"❌ Follow request failed with {resp.status_code}: {resp.text}")
 
-def main():
+
+def test_existing_endpoints():
+    """Test 6: Existing endpoints still work"""
+    print("\n=== Test 6: Existing endpoints still work ===")
+    
+    # Normal signup with valid username
+    timestamp = int(time.time()) % 100000  # Keep it short
+    email = f"norm{timestamp}@test.com"
+    username = f"norm{timestamp}"
+    password = "Normal123!"
+    
+    signup_payload = {
+        "name": "Normal User",
+        "username": username,
+        "email": email,
+        "password": password
+    }
+    resp = requests.post(f"{BASE_URL}/auth/signup/start", json=signup_payload)
+    if resp.status_code != 200:
+        print(f"❌ Normal signup failed: {resp.status_code} {resp.text}")
+        return
+    print(f"✅ Normal signup/start successful")
+    
+    # Get OTP and verify
+    otp_doc = db.otps.find_one({"email": email})
+    if not otp_doc:
+        print(f"❌ OTP not found")
+        return
+    
+    verify_payload = {"email": email, "code": otp_doc['code']}
+    resp = requests.post(f"{BASE_URL}/auth/signup/verify", json=verify_payload)
+    if resp.status_code != 200:
+        print(f"❌ Signup verify failed: {resp.status_code} {resp.text}")
+        return
+    print(f"✅ Signup verify successful")
+    
+    token = resp.json()['token']
+    
+    # Login
+    login_payload = {"email": email, "password": password}
+    resp = requests.post(f"{BASE_URL}/auth/login", json=login_payload)
+    if resp.status_code != 200:
+        print(f"❌ Login failed: {resp.status_code} {resp.text}")
+        return
+    print(f"✅ Login successful")
+    
+    # GET /users/{username}
+    resp = requests.get(f"{BASE_URL}/users/{username}")
+    if resp.status_code != 200:
+        print(f"❌ GET /users/{username} failed: {resp.status_code} {resp.text}")
+        return
+    print(f"✅ GET /users/{username} successful")
+    
+    # GET /users/{username}/followers
+    resp = requests.get(f"{BASE_URL}/users/{username}/followers")
+    if resp.status_code != 200:
+        print(f"❌ GET /users/{username}/followers failed: {resp.status_code} {resp.text}")
+        return
+    print(f"✅ GET /users/{username}/followers successful")
+    
+    print(f"\n✅ All existing endpoints working correctly")
+
+
+if __name__ == "__main__":
     print("=" * 80)
-    print("BACKEND API TESTING - FORGOT PASSWORD FLOW")
+    print("Backend API Tests - Reserved Usernames and Follow Email Notification")
     print("=" * 80)
     
     try:
-        # Test 1: Non-existent email
-        test_forgot_password_nonexistent_email()
+        test_reserved_usernames_at_signup()
+        test_reserved_usernames_at_check_username()
+        test_reserved_usernames_at_profile_update()
+        test_google_oauth_reserved_username()
+        test_follow_email_notification()
+        test_existing_endpoints()
         
-        # Test 2-3: Register user and forgot-password/start
-        email, old_password = test_forgot_password_registered_user()
-        
-        if email and old_password:
-            # Test 4-6: Verify flow
-            new_password = test_forgot_password_verify_flow(email, old_password)
-            
-            if new_password:
-                # Test 7-8: Login after reset
-                test_login_after_reset(email, old_password, new_password)
-        
-        # Test 9: Google user
-        test_google_user_password_reset()
-        
-        # Test 10: Attempts limit
-        test_attempts_limit()
-        
+        print("\n" + "=" * 80)
+        print("All tests completed!")
+        print("=" * 80)
     except Exception as e:
-        print(f"\n❌ CRITICAL ERROR: {e}")
+        print(f"\n❌ Test suite failed with exception: {e}")
         import traceback
         traceback.print_exc()
-    
-    # Summary
-    print("\n" + "=" * 80)
-    print("TEST SUMMARY")
-    print("=" * 80)
-    print(f"Total Tests: {tests_passed + tests_failed}")
-    print(f"Passed: {tests_passed}")
-    print(f"Failed: {tests_failed}")
-    print("=" * 80)
-    
-    if tests_failed > 0:
-        print("\n❌ SOME TESTS FAILED")
-        sys.exit(1)
-    else:
-        print("\n✅ ALL TESTS PASSED")
-        sys.exit(0)
-
-if __name__ == "__main__":
-    main()

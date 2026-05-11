@@ -74,10 +74,10 @@ const RightSidebar = () => {
         )}
         {suggestions.map((u) => (
           <div key={u.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors">
-            <Link to={`/u/${u.username}`} className="flex-shrink-0">
+            <Link to={`/${u.username}`} className="flex-shrink-0">
               <img src={u.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 40 40\'><rect width=\'40\' height=\'40\' fill=\'%231f2a24\'/></svg>'} alt={u.name} className="w-10 h-10 rounded-full object-cover bg-zinc-800 hover:opacity-90 transition-opacity" />
             </Link>
-            <Link to={`/u/${u.username}`} className="flex-1 min-w-0 hover:underline">
+            <Link to={`/${u.username}`} className="flex-1 min-w-0 hover:underline">
               <p className="font-bold text-sm truncate flex items-center gap-1">
                 {u.name} {u.verified && <VerifiedIcon />}
               </p>

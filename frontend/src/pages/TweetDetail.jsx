@@ -46,14 +46,14 @@ const TweetDetail = () => {
 
       <article className="px-4 py-4 border-b border-zinc-900">
         <div className="flex items-center gap-3">
-          <Link to={author.username ? `/u/${author.username}` : '#'}>
+          <Link to={author.username ? `/${author.username}` : '#'}>
             <img src={author.avatar || 'data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 40 40\'><rect width=\'40\' height=\'40\' fill=\'%231f2a24\'/></svg>'} alt="" className="w-12 h-12 rounded-full object-cover bg-zinc-800 hover:opacity-90 transition-opacity" />
           </Link>
           <div>
-            <Link to={author.username ? `/u/${author.username}` : '#'} className="font-bold flex items-center gap-1 hover:underline">
+            <Link to={author.username ? `/${author.username}` : '#'} className="font-bold flex items-center gap-1 hover:underline">
               {author.name} {author.verified && <VerifiedIcon />}
             </Link>
-            <Link to={author.username ? `/u/${author.username}` : '#'} className="text-zinc-500 text-sm hover:underline block">@{author.username}</Link>
+            <Link to={author.username ? `/${author.username}` : '#'} className="text-zinc-500 text-sm hover:underline block">@{author.username}</Link>
           </div>
         </div>
         <p className="text-[22px] leading-relaxed mt-3 whitespace-pre-wrap break-words">{tweet.content}</p>

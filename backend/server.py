@@ -23,7 +23,8 @@ from auth_utils import (
     hash_password, verify_password, create_token, current_user,
     optional_user, require_admin, public_user, ADMIN_EMAIL,
 )
-from email_service import send_otp_email, send_password_reset_email
+from email_service import send_otp_email, send_password_reset_email, send_new_follower_email
+import asyncio
 
 # Mongo
 mongo_url = os.environ['MONGO_URL']
@@ -243,11 +244,14 @@ async def google_auth(payload: GoogleAuth):
 
     if not user:
         # Generate unique username from email
+        from schemas import RESERVED_USERNAMES
         base = email.split('@')[0]
         base = ''.join(c for c in base if c.isalnum() or c == '_').lower()[:20] or 'user'
+        if base in RESERVED_USERNAMES or len(base) < 3:
+            base = f'user{int(now_utc().timestamp())}'[:20]
         username = base
         i = 0
-        while await db.users.find_one({'username': username}):
+        while await db.users.find_one({'username': username}) or username in RESERVED_USERNAMES:
             i += 1
             username = f'{base}{i}'[:20]
 
@@ -287,10 +291,12 @@ async def get_me(user=Depends(current_user)):
 
 @api.post('/auth/check-username')
 async def check_username(payload: UsernameCheck, user=Depends(optional_user)):
-    from schemas import USERNAME_RE
+    from schemas import USERNAME_RE, RESERVED_USERNAMES
     uname = payload.username.strip().lstrip('@').lower()
     if not USERNAME_RE.match(uname):
         return {'available': False, 'reason': 'invalid_format'}
+    if uname in RESERVED_USERNAMES:
+        return {'available': False, 'reason': 'reserved'}
     existing = await db.users.find_one({'username': uname})
     if existing and (not user or existing['id'] != user['id']):
         return {'available': False, 'reason': 'taken'}
@@ -421,6 +427,19 @@ async def follow_user(username: str, user=Depends(current_user)):
             'created_at': now_utc(),
             'read': False,
         })
+        # Send follower email notification (fire-and-forget so it doesn't block)
+        target_email = target.get('email')
+        if target_email and not target.get('email_notifications_disabled'):
+            asyncio.create_task(
+                asyncio.to_thread(
+                    send_new_follower_email,
+                    target_email,
+                    target.get('name', ''),
+                    user.get('name', ''),
+                    user.get('username', ''),
+                    'ar',
+                )
+            )
         target = await db.users.find_one({'id': target['id']})
         return {
             'following': True,
