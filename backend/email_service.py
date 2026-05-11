@@ -37,6 +37,40 @@ def send_otp_email(to_email: str, code: str, lang: str = 'ar') -> tuple[bool, st
           <p style="color:#5a635c; font-size:12px;">ksa1 · Saudi microblogging platform</p>
         </div>'''
 
+    return _send(to_email, subject, html)
+
+
+def send_password_reset_email(to_email: str, code: str, lang: str = 'ar') -> tuple[bool, str]:
+    if not API_KEY or not FROM_EMAIL:
+        return False, 'Email service not configured'
+
+    if lang == 'ar':
+        subject = f'إعادة تعيين كلمة المرور في ksa1: {code}'
+        html = f'''
+        <div style="font-family: Tajawal, Arial, sans-serif; max-width:520px; margin:auto; background:#0a100d; color:#e7e9ea; padding:40px; border-radius:16px; direction:rtl;">
+          <h2 style="color:#00a653; margin:0 0 8px;">إعادة تعيين كلمة المرور</h2>
+          <p style="color:#9aa0a6; margin:0 0 24px;">استخدم الرمز التالي لإعادة تعيين كلمة مرورك:</p>
+          <div style="background:#0c1410; border:1px solid #1f2a24; border-radius:12px; padding:24px; text-align:center; font-size:36px; font-weight:bold; letter-spacing:8px; color:#00bf5f;">{code}</div>
+          <p style="color:#9aa0a6; font-size:14px; margin-top:24px;">صلاحية الرمز 10 دقائق. إذا لم تطلب إعادة تعيين كلمة المرور، تجاهل هذه الرسالة وكلمة مرورك لن تتغير.</p>
+          <hr style="border:none; border-top:1px solid #1f2a24; margin:24px 0;">
+          <p style="color:#5a635c; font-size:12px;">ksa1 · منصة التغريد السعودية</p>
+        </div>'''
+    else:
+        subject = f'Reset your ksa1 password: {code}'
+        html = f'''
+        <div style="font-family: Inter, Arial, sans-serif; max-width:520px; margin:auto; background:#0a100d; color:#e7e9ea; padding:40px; border-radius:16px;">
+          <h2 style="color:#00a653; margin:0 0 8px;">Reset your password</h2>
+          <p style="color:#9aa0a6; margin:0 0 24px;">Use the following code to reset your password:</p>
+          <div style="background:#0c1410; border:1px solid #1f2a24; border-radius:12px; padding:24px; text-align:center; font-size:36px; font-weight:bold; letter-spacing:8px; color:#00bf5f;">{code}</div>
+          <p style="color:#9aa0a6; font-size:14px; margin-top:24px;">Valid for 10 minutes. If you didn\'t request this, ignore this email and your password will remain unchanged.</p>
+          <hr style="border:none; border-top:1px solid #1f2a24; margin:24px 0;">
+          <p style="color:#5a635c; font-size:12px;">ksa1 · Saudi microblogging platform</p>
+        </div>'''
+
+    return _send(to_email, subject, html)
+
+
+def _send(to_email: str, subject: str, html: str) -> tuple[bool, str]:
     try:
         msg = Mail(from_email=(FROM_EMAIL, FROM_NAME), to_emails=to_email, subject=subject, html_content=html)
         sg = SendGridAPIClient(API_KEY)

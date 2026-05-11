@@ -33,6 +33,8 @@ export const authApi = {
   google: (data) => api.post('/auth/google', data).then((r) => r.data),
   me: () => api.get('/auth/me').then((r) => r.data),
   checkUsername: (username) => api.post('/auth/check-username', { username }).then((r) => r.data),
+  forgotStart: (email) => api.post('/auth/forgot-password/start', { email }).then((r) => r.data),
+  forgotVerify: (data) => api.post('/auth/forgot-password/verify', data).then((r) => r.data),
 };
 
 // Users

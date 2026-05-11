@@ -261,6 +261,18 @@ backend:
         agent: "testing"
         comment: "GET /api/search/tweets?q={query} searches tweet content, GET /api/search/users?q={query} searches usernames and names"
 
+  - task: "Forgot Password Flow"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "All 12 forgot-password tests passed: (1) Non-existent email returns ok to avoid enumeration, (2) Registered user can request reset, (3) Reset code stored in MongoDB password_resets collection, (4) Wrong code returns 400 invalid_code, (5) Correct code resets password and returns token, (6) Old password fails after reset, (7) New password works after reset, (8) Google users cannot reset password (no code created), (9) 5 wrong attempts allowed, 6th returns 429 too_many_attempts. POST /api/auth/forgot-password/start and POST /api/auth/forgot-password/verify working correctly."
+
 frontend:
   - task: "Frontend UI"
     implemented: false
@@ -277,12 +289,12 @@ frontend:
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 1
+  test_sequence: 2
   run_ui: false
 
 test_plan:
   current_focus:
-    - "All backend endpoints tested and passing"
+    - "All backend endpoints tested and passing including forgot-password flow"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -290,3 +302,5 @@ test_plan:
 agent_communication:
   - agent: "testing"
     message: "Completed comprehensive backend testing. All 13 test scenarios passed successfully. Backend API is fully functional with proper authentication, authorization, CRUD operations, notifications, admin features, and search. SendGrid email service configured (may fail if sender not verified but endpoint returns ok response). No critical issues found."
+  - agent: "testing"
+    message: "Completed forgot-password flow testing. All 12 tests passed successfully. Forgot-password endpoints working correctly with proper email enumeration prevention, code validation, attempts limiting, Google user protection, and password reset functionality. No critical issues found."

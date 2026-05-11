@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { LOGO_URL } from '../mock';
 import { useApp } from '../contexts/AppContext';
 import { t } from '../i18n';
-import { Languages, Eye, EyeOff, ArrowLeft, Mail, Loader2 } from 'lucide-react';
+import { Languages, Eye, EyeOff, ArrowLeft, Mail, Loader2, KeyRound } from 'lucide-react';
 import { authApi } from '../api';
 
 const GoogleIcon = () => (
@@ -47,12 +47,13 @@ const ERROR_MESSAGES = {
 const Login = () => {
   const { lang, toggleLang, onAuthSuccess } = useApp();
   const nav = useNavigate();
-  const [mode, setMode] = useState('signin'); // signin | signup | verify
+  const [mode, setMode] = useState('signin'); // signin | signup | verify | forgot | forgot-verify
   const [showPwd, setShowPwd] = useState(false);
-  const [form, setForm] = useState({ name: '', username: '', email: '', password: '', code: '' });
+  const [form, setForm] = useState({ name: '', username: '', email: '', password: '', code: '', new_password: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [usernameStatus, setUsernameStatus] = useState(null);
+  const [forgotInfo, setForgotInfo] = useState('');
 
   const errMsg = (key) => ERROR_MESSAGES[lang][key] || key;
 
@@ -130,12 +131,48 @@ const Login = () => {
     setError('');
     setLoading(true);
     try {
-      await authApi.signupStart({
-        name: form.name.trim(),
-        username: form.username,
+      if (mode === 'forgot-verify') {
+        await authApi.forgotStart(form.email.trim());
+      } else {
+        await authApi.signupStart({
+          name: form.name.trim(),
+          username: form.username,
+          email: form.email.trim(),
+          password: form.password,
+        });
+      }
+    } catch (err) {
+      setError(errMsg(err.response?.data?.detail || 'network'));
+    } finally { setLoading(false); }
+  };
+
+  const handleForgotStart = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      await authApi.forgotStart(form.email.trim());
+      setForgotInfo(lang === 'ar'
+        ? 'إذا كان البريد مسجلاً، سيصلك رمز إعادة التعيين خلال ثواني.'
+        : 'If the email is registered, a reset code is on its way.');
+      setMode('forgot-verify');
+    } catch (err) {
+      setError(errMsg(err.response?.data?.detail || 'network'));
+    } finally { setLoading(false); }
+  };
+
+  const handleForgotVerify = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const data = await authApi.forgotVerify({
         email: form.email.trim(),
-        password: form.password,
+        code: form.code,
+        new_password: form.new_password,
       });
+      onAuthSuccess(data);
+      nav('/home');
     } catch (err) {
       setError(errMsg(err.response?.data?.detail || 'network'));
     } finally { setLoading(false); }
@@ -219,6 +256,85 @@ const Login = () => {
                   </button>
                 </form>
               </>
+            ) : mode === 'forgot' ? (
+              <>
+                <button onClick={() => { setMode('signin'); setError(''); }} className="flex items-center gap-2 text-zinc-400 hover:text-white mb-4 text-sm">
+                  <ArrowLeft size={16} className="flip-rtl" /> {lang === 'ar' ? 'رجوع لتسجيل الدخول' : 'Back to sign in'}
+                </button>
+                <div className="text-center mb-6">
+                  <div className="w-16 h-16 rounded-full bg-green-500/10 mx-auto flex items-center justify-center mb-3">
+                    <KeyRound size={28} className="text-green-500" />
+                  </div>
+                  <h2 className="text-2xl font-bold">{lang === 'ar' ? 'نسيت كلمة المرور؟' : 'Forgot password?'}</h2>
+                  <p className="text-sm text-zinc-400 mt-2">
+                    {lang === 'ar' ? 'أدخل بريدك المسجل لإرسال رمز إعادة التعيين.' : 'Enter your registered email to receive a reset code.'}
+                  </p>
+                </div>
+                <form onSubmit={handleForgotStart} className="space-y-3">
+                  <input
+                    type="email"
+                    placeholder={t(lang, 'email')}
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    required
+                    autoFocus
+                    className="w-full bg-[#0c1410] border border-zinc-800 focus:border-green-600 rounded-xl px-4 py-3 outline-none transition-colors"
+                  />
+                  {error && <p className="text-red-500 text-sm">{error}</p>}
+                  <button type="submit" disabled={loading} className="btn-primary w-full py-3 rounded-full font-bold">
+                    {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (lang === 'ar' ? 'إرسال الرمز' : 'Send code')}
+                  </button>
+                </form>
+              </>
+            ) : mode === 'forgot-verify' ? (
+              <>
+                <button onClick={() => setMode('forgot')} className="flex items-center gap-2 text-zinc-400 hover:text-white mb-4 text-sm">
+                  <ArrowLeft size={16} className="flip-rtl" /> {lang === 'ar' ? 'رجوع' : 'Back'}
+                </button>
+                <div className="text-center mb-6">
+                  <div className="w-16 h-16 rounded-full bg-green-500/10 mx-auto flex items-center justify-center mb-3">
+                    <KeyRound size={28} className="text-green-500" />
+                  </div>
+                  <h2 className="text-2xl font-bold">{lang === 'ar' ? 'إعادة تعيين كلمة المرور' : 'Reset password'}</h2>
+                  {forgotInfo && <p className="text-xs text-green-500 mt-2">{forgotInfo}</p>}
+                  <p className="text-sm text-zinc-400 mt-2">
+                    {lang === 'ar' ? `الرمز أُرسل إلى ${form.email}` : `Code sent to ${form.email}`}
+                  </p>
+                </div>
+                <form onSubmit={handleForgotVerify} className="space-y-3">
+                  <input
+                    autoFocus
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="000000"
+                    value={form.code}
+                    onChange={(e) => setForm({ ...form, code: e.target.value.replace(/\D/g, '') })}
+                    className="w-full bg-[#0c1410] border border-zinc-800 focus:border-green-600 rounded-xl px-4 py-3 outline-none text-center text-2xl tracking-[0.4em] font-bold transition-colors"
+                  />
+                  <div className="relative">
+                    <input
+                      type={showPwd ? 'text' : 'password'}
+                      placeholder={lang === 'ar' ? 'كلمة المرور الجديدة' : 'New password'}
+                      value={form.new_password}
+                      onChange={(e) => setForm({ ...form, new_password: e.target.value })}
+                      required
+                      minLength={6}
+                      className="w-full bg-[#0c1410] border border-zinc-800 focus:border-green-600 rounded-xl px-4 py-3 outline-none transition-colors"
+                    />
+                    <button type="button" onClick={() => setShowPwd((s) => !s)} className="absolute top-1/2 -translate-y-1/2 end-3 text-zinc-500 hover:text-zinc-300">
+                      {showPwd ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                  {error && <p className="text-red-500 text-sm">{error}</p>}
+                  <button type="submit" disabled={loading || form.code.length !== 6 || form.new_password.length < 6} className="btn-primary w-full py-3 rounded-full font-bold">
+                    {loading ? <Loader2 className="animate-spin mx-auto" size={20} /> : (lang === 'ar' ? 'تعيين كلمة المرور' : 'Set new password')}
+                  </button>
+                  <button type="button" onClick={handleResend} disabled={loading} className="w-full text-sm text-green-500 hover:underline">
+                    {lang === 'ar' ? 'إعادة إرسال الرمز' : 'Resend code'}
+                  </button>
+                </form>
+              </>
             ) : (
               <>
                 <h2 className="text-2xl font-bold mb-6">
@@ -296,6 +412,14 @@ const Login = () => {
                       {showPwd ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
                   </div>
+
+                  {mode === 'signin' && (
+                    <div className="flex justify-end">
+                      <button type="button" onClick={() => { setMode('forgot'); setError(''); }} className="text-sm text-green-500 hover:underline">
+                        {lang === 'ar' ? 'نسيت كلمة المرور؟' : 'Forgot password?'}
+                      </button>
+                    </div>
+                  )}
 
                   {error && <p className="text-red-500 text-sm">{error}</p>}
 

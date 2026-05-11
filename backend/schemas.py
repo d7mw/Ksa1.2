@@ -43,6 +43,16 @@ class GoogleAuth(BaseModel):
     avatar: Optional[str] = ''
 
 
+class ForgotPasswordStart(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordVerify(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=6, max_length=100)
+
+
 class UpdateProfile(BaseModel):
     name: Optional[str] = Field(default=None, max_length=50)
     username: Optional[str] = None

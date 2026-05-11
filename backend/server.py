@@ -17,12 +17,13 @@ load_dotenv(ROOT_DIR / '.env')
 from schemas import (
     SignupStart, SignupVerify, LoginRequest, GoogleAuth,
     UpdateProfile, TweetCreate, UsernameCheck, new_id,
+    ForgotPasswordStart, ForgotPasswordVerify,
 )
 from auth_utils import (
     hash_password, verify_password, create_token, current_user,
     optional_user, require_admin, public_user, ADMIN_EMAIL,
 )
-from email_service import send_otp_email
+from email_service import send_otp_email, send_password_reset_email
 
 # Mongo
 mongo_url = os.environ['MONGO_URL']
@@ -54,6 +55,8 @@ async def ensure_indexes():
     await db.likes.create_index([('user_id', ASCENDING), ('tweet_id', ASCENDING)], unique=True)
     await db.otps.create_index([('expires_at', ASCENDING)], expireAfterSeconds=0)
     await db.otps.create_index([('email', ASCENDING)])
+    await db.password_resets.create_index([('expires_at', ASCENDING)], expireAfterSeconds=0)
+    await db.password_resets.create_index([('email', ASCENDING)])
 
 
 async def serialize_tweet(tw: dict, viewer_id: Optional[str]) -> dict:
@@ -242,6 +245,56 @@ async def check_username(payload: UsernameCheck, user=Depends(optional_user)):
     if existing and (not user or existing['id'] != user['id']):
         return {'available': False, 'reason': 'taken'}
     return {'available': True}
+
+
+@api.post('/auth/forgot-password/start')
+async def forgot_password_start(payload: ForgotPasswordStart):
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({'email': email})
+    # Always return ok to avoid email enumeration; only send code if user exists
+    if user and user.get('auth_provider') != 'google':
+        code = gen_otp()
+        expires = now_utc() + timedelta(minutes=10)
+        await db.password_resets.delete_many({'email': email})
+        await db.password_resets.insert_one({
+            'id': new_id(),
+            'email': email,
+            'code': code,
+            'expires_at': expires,
+            'attempts': 0,
+            'created_at': now_utc(),
+        })
+        send_password_reset_email(email, code, 'ar')
+    return {'status': 'ok'}
+
+
+@api.post('/auth/forgot-password/verify')
+async def forgot_password_verify(payload: ForgotPasswordVerify):
+    email = payload.email.lower().strip()
+    rec = await db.password_resets.find_one({'email': email})
+    if not rec:
+        raise HTTPException(400, 'otp_not_found')
+    if rec.get('attempts', 0) >= 5:
+        await db.password_resets.delete_one({'_id': rec['_id']})
+        raise HTTPException(429, 'too_many_attempts')
+    if rec['code'] != payload.code:
+        await db.password_resets.update_one({'_id': rec['_id']}, {'$inc': {'attempts': 1}})
+        raise HTTPException(400, 'invalid_code')
+    # Check expiry manually (TTL also handles it)
+    if rec['expires_at'].replace(tzinfo=timezone.utc) < now_utc():
+        await db.password_resets.delete_one({'_id': rec['_id']})
+        raise HTTPException(400, 'otp_expired')
+
+    user = await db.users.find_one({'email': email})
+    if not user:
+        raise HTTPException(404, 'user_not_found')
+    await db.users.update_one({'id': user['id']}, {'$set': {
+        'password_hash': hash_password(payload.new_password),
+    }})
+    await db.password_resets.delete_one({'_id': rec['_id']})
+    token = create_token(user['id'])
+    user = await db.users.find_one({'id': user['id']})
+    return {'token': token, 'user': public_user(user, user['id'])}
 
 
 # ------------- users -------------
