@@ -1,24 +1,16 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { tweets as mockTweets, currentUser as mockUser, users as mockUsers } from '../mock';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { authApi, tweetsApi, usersApi, setToken, getToken } from '../api';
 
 const AppContext = createContext(null);
-
 export const useApp = () => useContext(AppContext);
 
 export const AppProvider = ({ children }) => {
   const [lang, setLang] = useState(() => localStorage.getItem('ksa1_lang') || 'ar');
-  const [user, setUser] = useState(() => {
-    const stored = localStorage.getItem('ksa1_user');
-    return stored ? JSON.parse(stored) : null;
-  });
-  const [tweets, setTweets] = useState(() => {
-    const stored = localStorage.getItem('ksa1_tweets');
-    return stored ? JSON.parse(stored) : mockTweets;
-  });
-  const [followingIds, setFollowingIds] = useState(() => {
-    const stored = localStorage.getItem('ksa1_following');
-    return stored ? JSON.parse(stored) : ['u1', 'u3'];
-  });
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [tweets, setTweets] = useState([]);
+  const [tweetsLoading, setTweetsLoading] = useState(false);
+  const [feedTab, setFeedTab] = useState('forYou');
 
   useEffect(() => {
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
@@ -26,71 +18,86 @@ export const AppProvider = ({ children }) => {
     localStorage.setItem('ksa1_lang', lang);
   }, [lang]);
 
+  // Load current user from token
   useEffect(() => {
-    if (user) localStorage.setItem('ksa1_user', JSON.stringify(user));
-    else localStorage.removeItem('ksa1_user');
-  }, [user]);
+    const token = getToken();
+    if (!token) {
+      setAuthLoading(false);
+      return;
+    }
+    authApi.me()
+      .then((u) => setUser(u))
+      .catch(() => setToken(null))
+      .finally(() => setAuthLoading(false));
+  }, []);
+
+  const refreshFeed = useCallback(async (tab = feedTab) => {
+    setTweetsLoading(true);
+    try {
+      const data = await tweetsApi.feed(tab);
+      setTweets(data);
+    } catch (e) {
+      console.error('feed error', e);
+    } finally {
+      setTweetsLoading(false);
+    }
+  }, [feedTab]);
 
   useEffect(() => {
-    localStorage.setItem('ksa1_tweets', JSON.stringify(tweets));
-  }, [tweets]);
+    if (user) refreshFeed(feedTab);
+  }, [user, feedTab, refreshFeed]);
 
-  useEffect(() => {
-    localStorage.setItem('ksa1_following', JSON.stringify(followingIds));
-  }, [followingIds]);
+  const onAuthSuccess = ({ token, user: u }) => {
+    setToken(token);
+    setUser(u);
+  };
 
-  const login = (userData) => setUser(userData);
-  const logout = () => setUser(null);
+  const logout = () => {
+    setToken(null);
+    setUser(null);
+    setTweets([]);
+  };
+
   const toggleLang = () => setLang((l) => (l === 'ar' ? 'en' : 'ar'));
 
-  const addTweet = (content, image) => {
-    if (!user) return;
-    const newTweet = {
-      id: `t_${Date.now()}`,
-      userId: user.id,
-      content,
-      image,
-      timestamp: lang === 'ar' ? 'الآن' : 'now',
-      likes: 0,
-      retweets: 0,
-      replies: 0,
-      views: 1,
-      liked: false,
-      retweeted: false,
-      isMe: true,
-    };
-    setTweets((t) => [newTweet, ...t]);
+  const updateUser = async (data) => {
+    const u = await usersApi.updateMe(data);
+    setUser((cur) => ({ ...cur, ...u }));
+    return u;
   };
 
-  const toggleLike = (tweetId) => {
+  const createTweet = async (content, image, parent_id) => {
+    const tw = await tweetsApi.create({ content, image, parent_id });
+    if (!parent_id) setTweets((arr) => [tw, ...arr]);
+    return tw;
+  };
+
+  const toggleLike = async (tweetId) => {
+    // Optimistic update
     setTweets((arr) =>
       arr.map((t) =>
         t.id === tweetId
-          ? { ...t, liked: !t.liked, likes: t.liked ? t.likes - 1 : t.likes + 1 }
+          ? { ...t, liked: !t.liked, likes_count: t.liked ? t.likes_count - 1 : t.likes_count + 1 }
           : t
       )
     );
+    try {
+      await tweetsApi.like(tweetId);
+    } catch (e) {
+      // revert on error
+      setTweets((arr) =>
+        arr.map((t) =>
+          t.id === tweetId
+            ? { ...t, liked: !t.liked, likes_count: t.liked ? t.likes_count - 1 : t.likes_count + 1 }
+            : t
+        )
+      );
+    }
   };
 
-  const toggleRetweet = (tweetId) => {
-    setTweets((arr) =>
-      arr.map((t) =>
-        t.id === tweetId
-          ? { ...t, retweeted: !t.retweeted, retweets: t.retweeted ? t.retweets - 1 : t.retweets + 1 }
-          : t
-      )
-    );
-  };
-
-  const toggleFollow = (userId) => {
-    setFollowingIds((ids) =>
-      ids.includes(userId) ? ids.filter((i) => i !== userId) : [...ids, userId]
-    );
-  };
-
-  const getUserById = (id) => {
-    if (user && id === user.id) return user;
-    return mockUsers.find((u) => u.id === id) || mockUser;
+  const deleteTweet = async (tweetId) => {
+    await tweetsApi.delete(tweetId);
+    setTweets((arr) => arr.filter((t) => t.id !== tweetId));
   };
 
   return (
@@ -100,15 +107,19 @@ export const AppProvider = ({ children }) => {
         setLang,
         toggleLang,
         user,
-        login,
+        setUser,
+        authLoading,
+        onAuthSuccess,
         logout,
+        updateUser,
         tweets,
-        addTweet,
+        tweetsLoading,
+        refreshFeed,
+        feedTab,
+        setFeedTab,
+        createTweet,
         toggleLike,
-        toggleRetweet,
-        followingIds,
-        toggleFollow,
-        getUserById,
+        deleteTweet,
       }}
     >
       {children}

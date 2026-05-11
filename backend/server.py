@@ -1,89 +1,710 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Query
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ASCENDING
 import os
 import logging
+import random
+import string
 from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List
-import uuid
-from datetime import datetime, timezone
-
+from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+from schemas import (
+    SignupStart, SignupVerify, LoginRequest, GoogleAuth,
+    UpdateProfile, TweetCreate, UsernameCheck, new_id,
+)
+from auth_utils import (
+    hash_password, verify_password, create_token, current_user,
+    optional_user, require_admin, public_user, ADMIN_EMAIL,
+)
+from email_service import send_otp_email
+
+# Mongo
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
-app = FastAPI()
+app = FastAPI(title='ksa1 API')
+api = APIRouter(prefix='/api')
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+logger = logging.getLogger('ksa1')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
+
+# ------------- helpers -------------
+
+def now_utc():
+    return datetime.now(timezone.utc)
 
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+def gen_otp() -> str:
+    return ''.join(random.choices(string.digits, k=6))
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
+async def ensure_indexes():
+    await db.users.create_index([('username', ASCENDING)], unique=True)
+    await db.users.create_index([('email', ASCENDING)], unique=True)
+    await db.tweets.create_index([('created_at', ASCENDING)])
+    await db.tweets.create_index([('user_id', ASCENDING)])
+    await db.follows.create_index([('follower_id', ASCENDING), ('following_id', ASCENDING)], unique=True)
+    await db.likes.create_index([('user_id', ASCENDING), ('tweet_id', ASCENDING)], unique=True)
+    await db.otps.create_index([('expires_at', ASCENDING)], expireAfterSeconds=0)
+    await db.otps.create_index([('email', ASCENDING)])
+
+
+async def serialize_tweet(tw: dict, viewer_id: Optional[str]) -> dict:
+    author = await db.users.find_one({'id': tw['user_id']})
+    liked = False
+    if viewer_id:
+        liked = bool(await db.likes.find_one({'user_id': viewer_id, 'tweet_id': tw['id']}))
+    return {
+        'id': tw['id'],
+        'user_id': tw['user_id'],
+        'content': tw['content'],
+        'image': tw.get('image'),
+        'parent_id': tw.get('parent_id'),
+        'created_at': tw['created_at'],
+        'likes_count': tw.get('likes_count', 0),
+        'retweets_count': tw.get('retweets_count', 0),
+        'replies_count': tw.get('replies_count', 0),
+        'views': tw.get('views', 0),
+        'liked': liked,
+        'author': public_user(author, viewer_id) if author else None,
+    }
+
+
+# ------------- auth -------------
+
+@api.post('/auth/signup/start')
+async def signup_start(payload: SignupStart):
+    email = payload.email.lower()
+    username = payload.username  # already normalized
+
+    if await db.users.find_one({'email': email}):
+        raise HTTPException(409, 'email_taken')
+    if await db.users.find_one({'username': username}):
+        raise HTTPException(409, 'username_taken')
+
+    code = gen_otp()
+    expires = now_utc() + timedelta(minutes=10)
+
+    # Replace any existing pending otp for this email
+    await db.otps.delete_many({'email': email})
+    await db.otps.insert_one({
+        'id': new_id(),
+        'email': email,
+        'code': code,
+        'expires_at': expires,
+        'attempts': 0,
+        'pending_user': {
+            'name': payload.name.strip(),
+            'username': username,
+            'email': email,
+            'password_hash': hash_password(payload.password),
+        },
+        'created_at': now_utc(),
+    })
+
+    ok, msg = send_otp_email(email, code, 'ar')
+    return {'status': 'otp_sent', 'email': email, 'delivery': 'ok' if ok else f'failed: {msg}'}
+
+
+@api.post('/auth/signup/verify')
+async def signup_verify(payload: SignupVerify):
+    email = payload.email.lower()
+    otp = await db.otps.find_one({'email': email})
+    if not otp:
+        raise HTTPException(400, 'otp_not_found')
+    if otp.get('attempts', 0) >= 5:
+        await db.otps.delete_one({'_id': otp['_id']})
+        raise HTTPException(429, 'too_many_attempts')
+    if otp['code'] != payload.code:
+        await db.otps.update_one({'_id': otp['_id']}, {'$inc': {'attempts': 1}})
+        raise HTTPException(400, 'invalid_code')
+
+    pending = otp['pending_user']
+
+    # Double-check uniqueness at commit time
+    if await db.users.find_one({'email': pending['email']}):
+        await db.otps.delete_one({'_id': otp['_id']})
+        raise HTTPException(409, 'email_taken')
+    if await db.users.find_one({'username': pending['username']}):
+        await db.otps.delete_one({'_id': otp['_id']})
+        raise HTTPException(409, 'username_taken')
+
+    user_id = new_id()
+    user = {
+        'id': user_id,
+        'name': pending['name'],
+        'username': pending['username'],
+        'email': pending['email'],
+        'password_hash': pending['password_hash'],
+        'auth_provider': 'email',
+        'verified': False,
+        'verification_requested': False,
+        'banned': False,
+        'bio': '',
+        'location': '',
+        'avatar': '',
+        'cover': '',
+        'followers_count': 0,
+        'following_count': 0,
+        'created_at': now_utc(),
+        'email_verified': True,
+    }
+    await db.users.insert_one(user)
+    await db.otps.delete_one({'_id': otp['_id']})
+
+    token = create_token(user_id)
+    return {'token': token, 'user': public_user(user, user_id)}
+
+
+@api.post('/auth/login')
+async def login(payload: LoginRequest):
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({'email': email})
+    if not user:
+        raise HTTPException(401, 'invalid_credentials')
+    if user.get('banned'):
+        raise HTTPException(403, 'account_banned')
+    if user.get('auth_provider') == 'google' and not user.get('password_hash'):
+        raise HTTPException(401, 'use_google_login')
+    if not verify_password(payload.password, user.get('password_hash', '')):
+        raise HTTPException(401, 'invalid_credentials')
+    if not user.get('email_verified'):
+        raise HTTPException(403, 'email_not_verified')
+
+    token = create_token(user['id'])
+    return {'token': token, 'user': public_user(user, user['id'])}
+
+
+@api.post('/auth/google')
+async def google_auth(payload: GoogleAuth):
+    """Login or register a user via Google. Trusted client-side Emergent Auth integration."""
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({'email': email})
+
+    if not user:
+        # Generate unique username from email
+        base = email.split('@')[0]
+        base = ''.join(c for c in base if c.isalnum() or c == '_').lower()[:20] or 'user'
+        username = base
+        i = 0
+        while await db.users.find_one({'username': username}):
+            i += 1
+            username = f'{base}{i}'[:20]
+
+        user_id = new_id()
+        user = {
+            'id': user_id,
+            'name': payload.name[:50],
+            'username': username,
+            'email': email,
+            'password_hash': '',
+            'auth_provider': 'google',
+            'verified': False,
+            'verification_requested': False,
+            'banned': False,
+            'bio': '',
+            'location': '',
+            'avatar': payload.avatar or '',
+            'cover': '',
+            'followers_count': 0,
+            'following_count': 0,
+            'created_at': now_utc(),
+            'email_verified': True,
+        }
+        await db.users.insert_one(user)
+    else:
+        if user.get('banned'):
+            raise HTTPException(403, 'account_banned')
+
+    token = create_token(user['id'])
+    return {'token': token, 'user': public_user(user, user['id'])}
+
+
+@api.get('/auth/me')
+async def get_me(user=Depends(current_user)):
+    return public_user(user, user['id'])
+
+
+@api.post('/auth/check-username')
+async def check_username(payload: UsernameCheck, user=Depends(optional_user)):
+    from schemas import USERNAME_RE
+    uname = payload.username.strip().lstrip('@').lower()
+    if not USERNAME_RE.match(uname):
+        return {'available': False, 'reason': 'invalid_format'}
+    existing = await db.users.find_one({'username': uname})
+    if existing and (not user or existing['id'] != user['id']):
+        return {'available': False, 'reason': 'taken'}
+    return {'available': True}
+
+
+# ------------- users -------------
+
+@api.patch('/users/me')
+async def update_me(payload: UpdateProfile, user=Depends(current_user)):
+    updates = {}
+    if payload.name is not None:
+        updates['name'] = payload.name.strip()[:50]
+    if payload.username is not None and payload.username != user['username']:
+        existing = await db.users.find_one({'username': payload.username})
+        if existing and existing['id'] != user['id']:
+            raise HTTPException(409, 'username_taken')
+        updates['username'] = payload.username
+    if payload.bio is not None:
+        updates['bio'] = payload.bio[:160]
+    if payload.location is not None:
+        updates['location'] = payload.location[:30]
+    if payload.avatar is not None:
+        updates['avatar'] = payload.avatar
+    if payload.cover is not None:
+        updates['cover'] = payload.cover
+
+    if updates:
+        await db.users.update_one({'id': user['id']}, {'$set': updates})
+    updated = await db.users.find_one({'id': user['id']})
+    return public_user(updated, user['id'])
+
+
+@api.get('/users/{username}')
+async def get_user(username: str, viewer=Depends(optional_user)):
+    u = await db.users.find_one({'username': username.lower()})
+    if not u:
+        raise HTTPException(404, 'user_not_found')
+    viewer_id = viewer['id'] if viewer else None
+    data = public_user(u, viewer_id)
+    if viewer_id and viewer_id != u['id']:
+        data['is_following'] = bool(await db.follows.find_one({'follower_id': viewer_id, 'following_id': u['id']}))
+    return data
+
+
+@api.post('/users/{username}/follow')
+async def follow_user(username: str, user=Depends(current_user)):
+    target = await db.users.find_one({'username': username.lower()})
+    if not target:
+        raise HTTPException(404, 'user_not_found')
+    if target['id'] == user['id']:
+        raise HTTPException(400, 'cannot_follow_self')
+
+    existing = await db.follows.find_one({'follower_id': user['id'], 'following_id': target['id']})
+    if existing:
+        await db.follows.delete_one({'_id': existing['_id']})
+        await db.users.update_one({'id': user['id']}, {'$inc': {'following_count': -1}})
+        await db.users.update_one({'id': target['id']}, {'$inc': {'followers_count': -1}})
+        return {'following': False}
+    else:
+        await db.follows.insert_one({
+            'id': new_id(),
+            'follower_id': user['id'],
+            'following_id': target['id'],
+            'created_at': now_utc(),
+        })
+        await db.users.update_one({'id': user['id']}, {'$inc': {'following_count': 1}})
+        await db.users.update_one({'id': target['id']}, {'$inc': {'followers_count': 1}})
+        await db.notifications.insert_one({
+            'id': new_id(),
+            'type': 'follow',
+            'recipient_id': target['id'],
+            'actor_id': user['id'],
+            'created_at': now_utc(),
+            'read': False,
+        })
+        return {'following': True}
+
+
+# ------------- verification request -------------
+
+@api.post('/users/me/request-verification')
+async def request_verification(plan: str = Query('monthly', regex='^(monthly|yearly)$'), user=Depends(current_user)):
+    if user.get('verified'):
+        raise HTTPException(400, 'already_verified')
+    if user.get('verification_requested'):
+        raise HTTPException(400, 'already_requested')
+
+    await db.users.update_one({'id': user['id']}, {'$set': {
+        'verification_requested': True,
+        'verification_plan': plan,
+        'verification_requested_at': now_utc(),
+    }})
+    await db.verification_requests.insert_one({
+        'id': new_id(),
+        'user_id': user['id'],
+        'plan': plan,
+        'price': 25 if plan == 'monthly' else 200,
+        'status': 'pending',
+        'created_at': now_utc(),
+    })
+    return {'status': 'pending', 'plan': plan}
+
+
+# ------------- tweets -------------
+
+@api.post('/tweets')
+async def create_tweet(payload: TweetCreate, user=Depends(current_user)):
+    if payload.image and len(payload.image) > 7_500_000:
+        raise HTTPException(413, 'image_too_large')
+    if payload.parent_id:
+        parent = await db.tweets.find_one({'id': payload.parent_id})
+        if not parent:
+            raise HTTPException(404, 'parent_not_found')
+
+    tw = {
+        'id': new_id(),
+        'user_id': user['id'],
+        'content': payload.content.strip(),
+        'image': payload.image,
+        'parent_id': payload.parent_id,
+        'likes_count': 0,
+        'retweets_count': 0,
+        'replies_count': 0,
+        'views': 0,
+        'created_at': now_utc(),
+    }
+    await db.tweets.insert_one(tw)
+
+    if payload.parent_id:
+        await db.tweets.update_one({'id': payload.parent_id}, {'$inc': {'replies_count': 1}})
+        parent = await db.tweets.find_one({'id': payload.parent_id})
+        if parent and parent['user_id'] != user['id']:
+            await db.notifications.insert_one({
+                'id': new_id(),
+                'type': 'reply',
+                'recipient_id': parent['user_id'],
+                'actor_id': user['id'],
+                'tweet_id': tw['id'],
+                'parent_tweet_id': payload.parent_id,
+                'preview': payload.content[:80],
+                'created_at': now_utc(),
+                'read': False,
+            })
+
+    return await serialize_tweet(tw, user['id'])
+
+
+@api.get('/tweets/feed')
+async def feed(tab: str = 'forYou', limit: int = 50, user=Depends(optional_user)):
+    viewer_id = user['id'] if user else None
+    q = {'parent_id': None}
+    if tab == 'following' and user:
+        follows = await db.follows.find({'follower_id': user['id']}).to_list(1000)
+        following_ids = [f['following_id'] for f in follows] + [user['id']]
+        q['user_id'] = {'$in': following_ids}
+    elif tab == 'trending':
+        cursor = db.tweets.find({'parent_id': None}).sort([('likes_count', -1)]).limit(limit)
+        items = await cursor.to_list(limit)
+        return [await serialize_tweet(t, viewer_id) for t in items]
+
+    cursor = db.tweets.find(q).sort([('created_at', -1)]).limit(limit)
+    items = await cursor.to_list(limit)
+    return [await serialize_tweet(t, viewer_id) for t in items]
+
+
+@api.get('/tweets/{tweet_id}')
+async def get_tweet(tweet_id: str, user=Depends(optional_user)):
+    tw = await db.tweets.find_one({'id': tweet_id})
+    if not tw:
+        raise HTTPException(404, 'tweet_not_found')
+    await db.tweets.update_one({'id': tweet_id}, {'$inc': {'views': 1}})
+    tw['views'] = tw.get('views', 0) + 1
+    viewer_id = user['id'] if user else None
+    return await serialize_tweet(tw, viewer_id)
+
+
+@api.get('/tweets/{tweet_id}/replies')
+async def get_replies(tweet_id: str, user=Depends(optional_user)):
+    viewer_id = user['id'] if user else None
+    cursor = db.tweets.find({'parent_id': tweet_id}).sort([('created_at', -1)])
+    items = await cursor.to_list(200)
+    return [await serialize_tweet(t, viewer_id) for t in items]
+
+
+@api.delete('/tweets/{tweet_id}')
+async def delete_tweet(tweet_id: str, user=Depends(current_user)):
+    tw = await db.tweets.find_one({'id': tweet_id})
+    if not tw:
+        raise HTTPException(404, 'tweet_not_found')
+    if tw['user_id'] != user['id'] and not user.get('is_admin'):
+        raise HTTPException(403, 'forbidden')
+    await db.tweets.delete_one({'id': tweet_id})
+    await db.tweets.delete_many({'parent_id': tweet_id})
+    await db.likes.delete_many({'tweet_id': tweet_id})
+    if tw.get('parent_id'):
+        await db.tweets.update_one({'id': tw['parent_id']}, {'$inc': {'replies_count': -1}})
+    return {'deleted': True}
+
+
+@api.post('/tweets/{tweet_id}/like')
+async def like_tweet(tweet_id: str, user=Depends(current_user)):
+    tw = await db.tweets.find_one({'id': tweet_id})
+    if not tw:
+        raise HTTPException(404, 'tweet_not_found')
+    existing = await db.likes.find_one({'user_id': user['id'], 'tweet_id': tweet_id})
+    if existing:
+        await db.likes.delete_one({'_id': existing['_id']})
+        await db.tweets.update_one({'id': tweet_id}, {'$inc': {'likes_count': -1}})
+        return {'liked': False}
+    await db.likes.insert_one({
+        'id': new_id(),
+        'user_id': user['id'],
+        'tweet_id': tweet_id,
+        'created_at': now_utc(),
+    })
+    await db.tweets.update_one({'id': tweet_id}, {'$inc': {'likes_count': 1}})
+    if tw['user_id'] != user['id']:
+        await db.notifications.insert_one({
+            'id': new_id(),
+            'type': 'like',
+            'recipient_id': tw['user_id'],
+            'actor_id': user['id'],
+            'tweet_id': tweet_id,
+            'created_at': now_utc(),
+            'read': False,
+        })
+    return {'liked': True}
+
+
+@api.get('/users/{username}/tweets')
+async def user_tweets(username: str, kind: str = 'posts', user=Depends(optional_user)):
+    u = await db.users.find_one({'username': username.lower()})
+    if not u:
+        raise HTTPException(404, 'user_not_found')
+    viewer_id = user['id'] if user else None
+    if kind == 'media':
+        cursor = db.tweets.find({'user_id': u['id'], 'image': {'$ne': None}}).sort([('created_at', -1)])
+    elif kind == 'replies':
+        cursor = db.tweets.find({'user_id': u['id'], 'parent_id': {'$ne': None}}).sort([('created_at', -1)])
+    elif kind == 'likes':
+        likes = await db.likes.find({'user_id': u['id']}).sort([('created_at', -1)]).to_list(200)
+        ids = [l['tweet_id'] for l in likes]
+        cursor = db.tweets.find({'id': {'$in': ids}})
+        items = await cursor.to_list(200)
+        return [await serialize_tweet(t, viewer_id) for t in items]
+    else:
+        cursor = db.tweets.find({'user_id': u['id'], 'parent_id': None}).sort([('created_at', -1)])
+    items = await cursor.to_list(200)
+    return [await serialize_tweet(t, viewer_id) for t in items]
+
+
+# ------------- notifications -------------
+
+@api.get('/notifications')
+async def get_notifications(user=Depends(current_user)):
+    items = await db.notifications.find({'recipient_id': user['id']}).sort([('created_at', -1)]).limit(50).to_list(50)
+    out = []
+    for n in items:
+        actor = await db.users.find_one({'id': n['actor_id']})
+        out.append({
+            'id': n['id'],
+            'type': n['type'],
+            'created_at': n['created_at'],
+            'read': n.get('read', False),
+            'tweet_id': n.get('tweet_id'),
+            'preview': n.get('preview'),
+            'actor': public_user(actor, user['id']) if actor else None,
+        })
+    await db.notifications.update_many({'recipient_id': user['id'], 'read': False}, {'$set': {'read': True}})
+    return out
+
+
+@api.get('/notifications/unread-count')
+async def unread_count(user=Depends(current_user)):
+    n = await db.notifications.count_documents({'recipient_id': user['id'], 'read': False})
+    return {'count': n}
+
+
+# ------------- explore / suggestions -------------
+
+@api.get('/users/suggestions/list')
+async def suggestions(user=Depends(current_user)):
+    follows = await db.follows.find({'follower_id': user['id']}).to_list(1000)
+    excluded = [f['following_id'] for f in follows] + [user['id']]
+    cursor = db.users.find({'id': {'$nin': excluded}, 'banned': {'$ne': True}}).sort([('followers_count', -1)]).limit(5)
+    items = await cursor.to_list(5)
+    return [public_user(u, user['id']) for u in items]
+
+
+@api.get('/search/tweets')
+async def search_tweets(q: str = Query(..., min_length=1), user=Depends(optional_user)):
+    viewer_id = user['id'] if user else None
+    cursor = db.tweets.find({'content': {'$regex': q, '$options': 'i'}, 'parent_id': None}).sort([('created_at', -1)]).limit(50)
+    items = await cursor.to_list(50)
+    return [await serialize_tweet(t, viewer_id) for t in items]
+
+
+@api.get('/search/users')
+async def search_users(q: str = Query(..., min_length=1), user=Depends(optional_user)):
+    cursor = db.users.find({
+        '$or': [
+            {'username': {'$regex': q.lower(), '$options': 'i'}},
+            {'name': {'$regex': q, '$options': 'i'}},
+        ],
+        'banned': {'$ne': True},
+    }).limit(20)
+    items = await cursor.to_list(20)
+    viewer_id = user['id'] if user else None
+    return [public_user(u, viewer_id) for u in items]
+
+
+# ------------- admin -------------
+
+@api.get('/admin/stats')
+async def admin_stats(_=Depends(require_admin)):
+    return {
+        'users': await db.users.count_documents({}),
+        'tweets': await db.tweets.count_documents({}),
+        'verified': await db.users.count_documents({'verified': True}),
+        'pending_verifications': await db.verification_requests.count_documents({'status': 'pending'}),
+        'banned': await db.users.count_documents({'banned': True}),
+    }
+
+
+@api.get('/admin/users')
+async def admin_users(q: str = '', skip: int = 0, limit: int = 50, _=Depends(require_admin)):
+    query = {}
+    if q:
+        query = {
+            '$or': [
+                {'username': {'$regex': q.lower(), '$options': 'i'}},
+                {'email': {'$regex': q.lower(), '$options': 'i'}},
+                {'name': {'$regex': q, '$options': 'i'}},
+            ]
+        }
+    cursor = db.users.find(query).sort([('created_at', -1)]).skip(skip).limit(limit)
+    items = await cursor.to_list(limit)
+    return [{
+        **public_user(u, u['id']),
+        'email': u.get('email'),
+        'banned': u.get('banned', False),
+        'auth_provider': u.get('auth_provider'),
+    } for u in items]
+
+
+@api.post('/admin/users/{user_id}/verify')
+async def admin_verify(user_id: str, _=Depends(require_admin)):
+    await db.users.update_one({'id': user_id}, {'$set': {
+        'verified': True,
+        'verification_requested': False,
+        'verified_at': now_utc(),
+    }})
+    await db.verification_requests.update_many(
+        {'user_id': user_id, 'status': 'pending'},
+        {'$set': {'status': 'approved', 'reviewed_at': now_utc()}}
+    )
+    await db.notifications.insert_one({
+        'id': new_id(),
+        'type': 'verified',
+        'recipient_id': user_id,
+        'actor_id': user_id,
+        'created_at': now_utc(),
+        'read': False,
+    })
+    return {'verified': True}
+
+
+@api.post('/admin/users/{user_id}/unverify')
+async def admin_unverify(user_id: str, _=Depends(require_admin)):
+    await db.users.update_one({'id': user_id}, {'$set': {'verified': False}})
+    return {'verified': False}
+
+
+@api.post('/admin/users/{user_id}/ban')
+async def admin_ban(user_id: str, _=Depends(require_admin)):
+    await db.users.update_one({'id': user_id}, {'$set': {'banned': True}})
+    return {'banned': True}
+
+
+@api.post('/admin/users/{user_id}/unban')
+async def admin_unban(user_id: str, _=Depends(require_admin)):
+    await db.users.update_one({'id': user_id}, {'$set': {'banned': False}})
+    return {'banned': False}
+
+
+@api.delete('/admin/users/{user_id}')
+async def admin_delete_user(user_id: str, _=Depends(require_admin)):
+    await db.users.delete_one({'id': user_id})
+    await db.tweets.delete_many({'user_id': user_id})
+    await db.likes.delete_many({'user_id': user_id})
+    await db.follows.delete_many({'$or': [{'follower_id': user_id}, {'following_id': user_id}]})
+    await db.notifications.delete_many({'$or': [{'recipient_id': user_id}, {'actor_id': user_id}]})
+    return {'deleted': True}
+
+
+@api.get('/admin/verification-requests')
+async def admin_verification_requests(status: str = 'pending', _=Depends(require_admin)):
+    cursor = db.verification_requests.find({'status': status}).sort([('created_at', -1)]).limit(100)
+    items = await cursor.to_list(100)
+    out = []
+    for r in items:
+        u = await db.users.find_one({'id': r['user_id']})
+        out.append({
+            'id': r['id'],
+            'user_id': r['user_id'],
+            'plan': r['plan'],
+            'price': r['price'],
+            'status': r['status'],
+            'created_at': r['created_at'],
+            'user': public_user(u, u['id']) if u else None,
+        })
+    return out
+
+
+@api.post('/admin/verification-requests/{req_id}/reject')
+async def admin_reject_request(req_id: str, _=Depends(require_admin)):
+    req = await db.verification_requests.find_one({'id': req_id})
+    if not req:
+        raise HTTPException(404, 'not_found')
+    await db.verification_requests.update_one({'id': req_id}, {'$set': {'status': 'rejected', 'reviewed_at': now_utc()}})
+    await db.users.update_one({'id': req['user_id']}, {'$set': {'verification_requested': False}})
+    return {'rejected': True}
+
+
+@api.get('/admin/tweets')
+async def admin_tweets(q: str = '', skip: int = 0, limit: int = 50, _=Depends(require_admin)):
+    query = {}
+    if q:
+        query = {'content': {'$regex': q, '$options': 'i'}}
+    cursor = db.tweets.find(query).sort([('created_at', -1)]).skip(skip).limit(limit)
+    items = await cursor.to_list(limit)
+    return [await serialize_tweet(t, None) for t in items]
+
+
+@api.delete('/admin/tweets/{tweet_id}')
+async def admin_delete_tweet(tweet_id: str, _=Depends(require_admin)):
+    await db.tweets.delete_one({'id': tweet_id})
+    await db.tweets.delete_many({'parent_id': tweet_id})
+    await db.likes.delete_many({'tweet_id': tweet_id})
+    return {'deleted': True}
+
+
+# ------------- health -------------
+
+@api.get('/')
 async def root():
-    return {"message": "Hello World"}
+    return {'app': 'ksa1', 'version': '1.0', 'admin_email_configured': bool(ADMIN_EMAIL)}
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
-    
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
-    
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
-    
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
-
-# Include the router in the main app
-app.include_router(api_router)
+app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=['*'],
+    allow_methods=['*'],
+    allow_headers=['*'],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
-@app.on_event("shutdown")
-async def shutdown_db_client():
+@app.on_event('startup')
+async def startup():
+    await ensure_indexes()
+    logger.info('ksa1 backend ready. Admin email: %s', ADMIN_EMAIL)
+
+
+@app.on_event('shutdown')
+async def shutdown():
     client.close()
