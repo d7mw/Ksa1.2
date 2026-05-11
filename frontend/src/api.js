@@ -42,6 +42,8 @@ export const usersApi = {
   updateMe: (data) => api.patch('/users/me', data).then((r) => r.data),
   get: (username) => api.get(`/users/${username}`).then((r) => r.data),
   follow: (username) => api.post(`/users/${username}/follow`).then((r) => r.data),
+  followers: (username) => api.get(`/users/${username}/followers`).then((r) => r.data),
+  following: (username) => api.get(`/users/${username}/following`).then((r) => r.data),
   suggestions: () => api.get('/users/suggestions/list').then((r) => r.data),
   tweets: (username, kind = 'posts') => api.get(`/users/${username}/tweets`, { params: { kind } }).then((r) => r.data),
   requestVerification: (plan) => api.post('/users/me/request-verification', null, { params: { plan } }).then((r) => r.data),

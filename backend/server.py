@@ -399,7 +399,11 @@ async def follow_user(username: str, user=Depends(current_user)):
         await db.follows.delete_one({'_id': existing['_id']})
         await db.users.update_one({'id': user['id']}, {'$inc': {'following_count': -1}})
         await db.users.update_one({'id': target['id']}, {'$inc': {'followers_count': -1}})
-        return {'following': False}
+        target = await db.users.find_one({'id': target['id']})
+        return {
+            'following': False,
+            'target_followers_count': target.get('followers_count', 0),
+        }
     else:
         await db.follows.insert_one({
             'id': new_id(),
@@ -417,7 +421,71 @@ async def follow_user(username: str, user=Depends(current_user)):
             'created_at': now_utc(),
             'read': False,
         })
-        return {'following': True}
+        target = await db.users.find_one({'id': target['id']})
+        return {
+            'following': True,
+            'target_followers_count': target.get('followers_count', 0),
+        }
+
+
+@api.get('/users/{username}/followers')
+async def list_followers(username: str, viewer=Depends(optional_user)):
+    u = await db.users.find_one({'username': username.lower()})
+    if not u:
+        raise HTTPException(404, 'user_not_found')
+    follows = await db.follows.find({'following_id': u['id']}).sort([('created_at', -1)]).limit(500).to_list(500)
+    if not follows:
+        return []
+    ids = [f['follower_id'] for f in follows]
+    users_list = await db.users.find({'id': {'$in': ids}, 'banned': {'$ne': True}}).to_list(len(ids))
+    by_id = {u['id']: u for u in users_list}
+
+    viewer_id = viewer['id'] if viewer else None
+    viewer_follows = set()
+    if viewer_id:
+        v_follows = await db.follows.find({'follower_id': viewer_id, 'following_id': {'$in': ids}}).to_list(len(ids))
+        viewer_follows = {f['following_id'] for f in v_follows}
+
+    out = []
+    for f in follows:
+        usr = by_id.get(f['follower_id'])
+        if not usr:
+            continue
+        data = public_user(usr, viewer_id)
+        data['is_following'] = usr['id'] in viewer_follows
+        data['is_self'] = viewer_id == usr['id']
+        out.append(data)
+    return out
+
+
+@api.get('/users/{username}/following')
+async def list_following(username: str, viewer=Depends(optional_user)):
+    u = await db.users.find_one({'username': username.lower()})
+    if not u:
+        raise HTTPException(404, 'user_not_found')
+    follows = await db.follows.find({'follower_id': u['id']}).sort([('created_at', -1)]).limit(500).to_list(500)
+    if not follows:
+        return []
+    ids = [f['following_id'] for f in follows]
+    users_list = await db.users.find({'id': {'$in': ids}, 'banned': {'$ne': True}}).to_list(len(ids))
+    by_id = {u['id']: u for u in users_list}
+
+    viewer_id = viewer['id'] if viewer else None
+    viewer_follows = set()
+    if viewer_id:
+        v_follows = await db.follows.find({'follower_id': viewer_id, 'following_id': {'$in': ids}}).to_list(len(ids))
+        viewer_follows = {f['following_id'] for f in v_follows}
+
+    out = []
+    for f in follows:
+        usr = by_id.get(f['following_id'])
+        if not usr:
+            continue
+        data = public_user(usr, viewer_id)
+        data['is_following'] = usr['id'] in viewer_follows
+        data['is_self'] = viewer_id == usr['id']
+        out.append(data)
+    return out
 
 
 # ------------- verification request -------------

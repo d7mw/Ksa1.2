@@ -10,7 +10,7 @@ const VerifiedIcon = () => (
 );
 
 const RightSidebar = () => {
-  const { lang, user } = useApp();
+  const { lang, user, setUser } = useApp();
   const nav = useNavigate();
   const [suggestions, setSuggestions] = useState([]);
   const [followingIds, setFollowingIds] = useState([]);
@@ -21,11 +21,23 @@ const RightSidebar = () => {
   }, [user]);
 
   const onFollow = async (username, id) => {
+    const wasFollowing = followingIds.includes(id);
+    // Optimistic
+    setFollowingIds((ids) => wasFollowing ? ids.filter((i) => i !== id) : [...ids, id]);
+    if (user) {
+      setUser((cur) => cur ? { ...cur, following_count: !wasFollowing ? (cur.following_count || 0) + 1 : Math.max(0, (cur.following_count || 0) - 1) } : cur);
+    }
     try {
       const r = await usersApi.follow(username);
-      if (r.following) setFollowingIds((ids) => [...ids, id]);
+      if (r.following) setFollowingIds((ids) => ids.includes(id) ? ids : [...ids, id]);
       else setFollowingIds((ids) => ids.filter((i) => i !== id));
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      // revert
+      setFollowingIds((ids) => wasFollowing ? [...ids, id] : ids.filter((i) => i !== id));
+      if (user) {
+        setUser((cur) => cur ? { ...cur, following_count: wasFollowing ? (cur.following_count || 0) + 1 : Math.max(0, (cur.following_count || 0) - 1) } : cur);
+      }
+    }
   };
 
   return (

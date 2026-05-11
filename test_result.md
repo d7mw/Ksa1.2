@@ -321,6 +321,19 @@ backend:
         agent: "testing"
         comment: "All 17 tests passed for retweet-on-profile feature: (1) GET /api/users/{username}/tweets?kind=posts returns user's own tweets + retweets merged chronologically, (2) Retweets include retweeted_by field with complete user info (id, name, username, avatar), (3) Retweets include retweeted_at timestamp, (4) Works for both authenticated and unauthenticated requests, (5) Own tweets do not have retweeted_by field, (6) Unretweet correctly removes tweet from profile, (7) Re-retweet correctly adds tweet back to profile, (8) retweeted field correctly shows viewer's retweet status, (9) User's profile only shows their own tweets and retweets (not others' retweets). Feature working correctly."
 
+
+  - task: "Followers and Following Lists"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "All 7 test scenarios passed successfully for followers/following lists: (1) Created 3 test users via signup flow with OTP from MongoDB, (2) Follow + notification creation working (User A follows User B and User C, notifications created with correct actor details), (3) GET /api/users/{username}/followers returns array with all required fields (id, name, username, avatar, verified, is_following, is_self), works without auth (public), is_self correctly set when viewing as the follower, is_following correctly reflects viewer's follow status, (4) GET /api/users/{username}/following returns array with correct fields, sorted by latest follow first (User C before User B), (5) Unfollow + count update working correctly (unfollow returns {following: false, target_followers_count: 0}, followers/following lists updated correctly), (6) Edge cases handled correctly: GET /api/users/nonexistent/followers returns 404 user_not_found, GET /api/users/nonexistent/following returns 404 user_not_found, User A tries to follow themselves returns 400 cannot_follow_self, banned users correctly filtered from followers/following lists (verified by direct database manipulation), (7) target_followers_count accuracy verified: User A follows User B returns target_followers_count=1, User C follows User B returns target_followers_count=2, User A unfollows User B returns target_followers_count=1. All endpoints working correctly with proper authentication, authorization, field validation, and banned user filtering."
+
 frontend:
   - task: "Frontend UI"
     implemented: false
@@ -337,12 +350,12 @@ frontend:
 metadata:
   created_by: "testing_agent"
   version: "1.0"
-  test_sequence: 4
+  test_sequence: 5
   run_ui: false
 
 test_plan:
   current_focus:
-    - "All backend endpoints tested and passing including retweet, image upload, retweeted field in feeds, and retweet-on-profile feature"
+    - "All backend endpoints tested and passing including retweet, image upload, retweeted field in feeds, retweet-on-profile feature, and followers/following lists"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -356,3 +369,5 @@ agent_communication:
     message: "Completed retweet and image upload testing. All 19 tests passed successfully: (1) Retweet endpoint with toggle behavior, notification creation (excluding self-retweets), and 404 for non-existent tweets, (2) Image upload with size validation (413 for >7.5MB), (3) Retweeted field correctly included in feed, user tweets, and replies endpoints. No critical issues found."
   - agent: "testing"
     message: "Completed retweet-on-profile feature testing. All 17 tests passed successfully: (1) GET /api/users/{username}/tweets?kind=posts correctly returns user's own tweets + retweets merged chronologically, (2) Retweets include retweeted_by field with complete user info (id, name, username, avatar) and retweeted_at timestamp, (3) Works for both authenticated and unauthenticated requests, (4) Own tweets correctly have no retweeted_by field, (5) Unretweet/re-retweet flow works correctly, (6) retweeted field shows viewer's retweet status, (7) User profiles only show their own content. Feature fully functional. No critical issues found."
+  - agent: "testing"
+    message: "Completed followers/following lists testing. All 7 test scenarios passed successfully: (1) Created 3 test users via signup flow with OTP from MongoDB, (2) Follow + notification creation working with correct actor details, (3) GET /api/users/{username}/followers returns array with all required fields (id, name, username, avatar, verified, is_following, is_self), works without auth (public), is_self and is_following correctly set based on viewer, (4) GET /api/users/{username}/following returns array with correct fields sorted by latest follow first, (5) Unfollow + count update working correctly with accurate target_followers_count, (6) Edge cases handled correctly: 404 for nonexistent users, 400 for self-follow, banned users filtered from lists, (7) target_followers_count accuracy verified across multiple follow/unfollow operations. All endpoints working correctly with proper authentication, authorization, field validation, and banned user filtering. No critical issues found."
