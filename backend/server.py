@@ -84,6 +84,52 @@ async def serialize_tweet(tw: dict, viewer_id: Optional[str]) -> dict:
     }
 
 
+def _format_tweet(tw: dict, author: Optional[dict], viewer_id: Optional[str], liked: bool, retweeted: bool) -> dict:
+    return {
+        'id': tw['id'],
+        'user_id': tw['user_id'],
+        'content': tw['content'],
+        'image': tw.get('image'),
+        'parent_id': tw.get('parent_id'),
+        'created_at': tw['created_at'],
+        'likes_count': tw.get('likes_count', 0),
+        'retweets_count': tw.get('retweets_count', 0),
+        'replies_count': tw.get('replies_count', 0),
+        'views': tw.get('views', 0),
+        'liked': liked,
+        'retweeted': retweeted,
+        'author': public_user(author, viewer_id) if author else None,
+    }
+
+
+async def serialize_tweets(tweets_list: list, viewer_id: Optional[str]) -> list:
+    """Batched version of serialize_tweet to avoid N+1 queries."""
+    if not tweets_list:
+        return []
+    user_ids = list({t['user_id'] for t in tweets_list})
+    tweet_ids = [t['id'] for t in tweets_list]
+
+    authors_cur = db.users.find({'id': {'$in': user_ids}})
+    authors_list = await authors_cur.to_list(len(user_ids))
+    authors_by_id = {u['id']: u for u in authors_list}
+
+    liked_ids = set()
+    retweeted_ids = set()
+    if viewer_id:
+        likes_cur = db.likes.find({'user_id': viewer_id, 'tweet_id': {'$in': tweet_ids}})
+        likes_docs = await likes_cur.to_list(len(tweet_ids))
+        liked_ids = {l['tweet_id'] for l in likes_docs}
+
+        rt_cur = db.retweets.find({'user_id': viewer_id, 'tweet_id': {'$in': tweet_ids}})
+        rt_docs = await rt_cur.to_list(len(tweet_ids))
+        retweeted_ids = {r['tweet_id'] for r in rt_docs}
+
+    return [
+        _format_tweet(t, authors_by_id.get(t['user_id']), viewer_id, t['id'] in liked_ids, t['id'] in retweeted_ids)
+        for t in tweets_list
+    ]
+
+
 # ------------- auth -------------
 
 @api.post('/auth/signup/start')
@@ -454,11 +500,11 @@ async def feed(tab: str = 'forYou', limit: int = 50, user=Depends(optional_user)
     elif tab == 'trending':
         cursor = db.tweets.find({'parent_id': None}).sort([('likes_count', -1)]).limit(limit)
         items = await cursor.to_list(limit)
-        return [await serialize_tweet(t, viewer_id) for t in items]
+        return await serialize_tweets(items, viewer_id)
 
     cursor = db.tweets.find(q).sort([('created_at', -1)]).limit(limit)
     items = await cursor.to_list(limit)
-    return [await serialize_tweet(t, viewer_id) for t in items]
+    return await serialize_tweets(items, viewer_id)
 
 
 @api.get('/tweets/{tweet_id}')
@@ -477,7 +523,7 @@ async def get_replies(tweet_id: str, user=Depends(optional_user)):
     viewer_id = user['id'] if user else None
     cursor = db.tweets.find({'parent_id': tweet_id}).sort([('created_at', -1)])
     items = await cursor.to_list(200)
-    return [await serialize_tweet(t, viewer_id) for t in items]
+    return await serialize_tweets(items, viewer_id)
 
 
 @api.delete('/tweets/{tweet_id}')
@@ -571,11 +617,11 @@ async def user_tweets(username: str, kind: str = 'posts', user=Depends(optional_
         ids = [l['tweet_id'] for l in likes]
         cursor = db.tweets.find({'id': {'$in': ids}})
         items = await cursor.to_list(200)
-        return [await serialize_tweet(t, viewer_id) for t in items]
+        return await serialize_tweets(items, viewer_id)
     else:
         cursor = db.tweets.find({'user_id': u['id'], 'parent_id': None}).sort([('created_at', -1)])
     items = await cursor.to_list(200)
-    return [await serialize_tweet(t, viewer_id) for t in items]
+    return await serialize_tweets(items, viewer_id)
 
 
 # ------------- notifications -------------
@@ -583,9 +629,14 @@ async def user_tweets(username: str, kind: str = 'posts', user=Depends(optional_
 @api.get('/notifications')
 async def get_notifications(user=Depends(current_user)):
     items = await db.notifications.find({'recipient_id': user['id']}).sort([('created_at', -1)]).limit(50).to_list(50)
+    if not items:
+        return []
+    actor_ids = list({n['actor_id'] for n in items if n.get('actor_id')})
+    actors_list = await db.users.find({'id': {'$in': actor_ids}}).to_list(len(actor_ids)) if actor_ids else []
+    actors_by_id = {u['id']: u for u in actors_list}
     out = []
     for n in items:
-        actor = await db.users.find_one({'id': n['actor_id']})
+        actor = actors_by_id.get(n.get('actor_id'))
         out.append({
             'id': n['id'],
             'type': n['type'],
@@ -621,7 +672,7 @@ async def search_tweets(q: str = Query(..., min_length=1), user=Depends(optional
     viewer_id = user['id'] if user else None
     cursor = db.tweets.find({'content': {'$regex': q, '$options': 'i'}, 'parent_id': None}).sort([('created_at', -1)]).limit(50)
     items = await cursor.to_list(50)
-    return [await serialize_tweet(t, viewer_id) for t in items]
+    return await serialize_tweets(items, viewer_id)
 
 
 @api.get('/search/users')
@@ -727,9 +778,14 @@ async def admin_delete_user(user_id: str, _=Depends(require_admin)):
 async def admin_verification_requests(status: str = 'pending', _=Depends(require_admin)):
     cursor = db.verification_requests.find({'status': status}).sort([('created_at', -1)]).limit(100)
     items = await cursor.to_list(100)
+    if not items:
+        return []
+    user_ids = list({r['user_id'] for r in items})
+    users_list = await db.users.find({'id': {'$in': user_ids}}).to_list(len(user_ids))
+    users_by_id = {u['id']: u for u in users_list}
     out = []
     for r in items:
-        u = await db.users.find_one({'id': r['user_id']})
+        u = users_by_id.get(r['user_id'])
         out.append({
             'id': r['id'],
             'user_id': r['user_id'],
@@ -759,7 +815,7 @@ async def admin_tweets(q: str = '', skip: int = 0, limit: int = 50, _=Depends(re
         query = {'content': {'$regex': q, '$options': 'i'}}
     cursor = db.tweets.find(query).sort([('created_at', -1)]).skip(skip).limit(limit)
     items = await cursor.to_list(limit)
-    return [await serialize_tweet(t, None) for t in items]
+    return await serialize_tweets(items, None)
 
 
 @api.delete('/admin/tweets/{tweet_id}')
