@@ -1078,7 +1078,10 @@ async def _serialize_conversation(conv: dict, me_id: str) -> dict:
 
 @api.get('/messages/conversations')
 async def list_conversations(user=Depends(current_user)):
-    cur = db.conversations.find({'participants': user['id']}).sort([('last_message_at', -1)]).limit(100)
+    cur = db.conversations.find({
+        'participants': user['id'],
+        'hidden_for': {'$ne': user['id']},
+    }).sort([('last_message_at', -1)]).limit(100)
     items = await cur.to_list(100)
     return [await _serialize_conversation(c, user['id']) for c in items]
 
@@ -1102,12 +1105,16 @@ async def start_conversation(payload: ConversationStart, user=Depends(current_us
     target = await db.users.find_one({'username': payload.username})
     if not target:
         raise HTTPException(404, 'user_not_found')
+    if target['id'] == user['id']:
+        raise HTTPException(400, 'cannot_dm_self')
     allowed, reason = await _can_dm(user, target)
-    # Allow opening the conversation UI even if restricted, so the user can see the explanation.
-    # The actual block happens on send.
     parts = _conv_key(user['id'], target['id'])
     existing = await db.conversations.find_one({'participants': parts})
     if existing:
+        # Un-hide for this user if they previously hid the conversation
+        if user['id'] in (existing.get('hidden_for') or []):
+            await db.conversations.update_one({'id': existing['id']}, {'$pull': {'hidden_for': user['id']}})
+            existing = await db.conversations.find_one({'id': existing['id']})
         conv = existing
     else:
         conv = {
@@ -1117,6 +1124,7 @@ async def start_conversation(payload: ConversationStart, user=Depends(current_us
             'last_message_at': now_utc(),
             'last_message_preview': '',
             'last_sender_id': None,
+            'hidden_for': [],
         }
         await db.conversations.insert_one(conv)
     return {
@@ -1198,13 +1206,18 @@ async def send_message(conv_id: str, payload: MessageCreate, user=Depends(curren
     await db.messages.insert_one(msg)
 
     preview = content[:80] if content else (f"[{attachments[0].get('type','file')}]" if attachments else '')
+    # Update the conversation's last-message metadata and un-hide it for any participants
+    # who had previously hidden it (so a new incoming message resurfaces the thread).
     await db.conversations.update_one(
         {'id': conv_id},
-        {'$set': {
-            'last_message_at': now,
-            'last_message_preview': preview,
-            'last_sender_id': user['id'],
-        }},
+        {
+            '$set': {
+                'last_message_at': now,
+                'last_message_preview': preview,
+                'last_sender_id': user['id'],
+            },
+            '$pull': {'hidden_for': {'$in': conv['participants']}},
+        },
     )
     return _serialize_message(msg)
 
@@ -1223,20 +1236,22 @@ async def mark_conversation_read(conv_id: str, user=Depends(current_user)):
 
 @api.delete('/messages/conversations/{conv_id}')
 async def delete_conversation(conv_id: str, user=Depends(current_user)):
-    """Hides conversation from the user (soft delete). Also deletes messages if no participants remain."""
+    """Hide conversation for the caller (peer still has it). Both hiding → real delete."""
     conv = await db.conversations.find_one({'id': conv_id})
     if not conv or user['id'] not in conv['participants']:
         raise HTTPException(404, 'conversation_not_found')
-    remaining = [p for p in conv['participants'] if p != user['id']]
-    if remaining:
-        # Keep conversation but mark hidden for this user via a 'hidden_for' array
-        await db.conversations.update_one(
-            {'id': conv_id},
-            {'$set': {'participants': remaining}, '$addToSet': {'hidden_for': user['id']}}
-        )
-    else:
+    hidden_for = set(conv.get('hidden_for') or [])
+    hidden_for.add(user['id'])
+    # If both participants have hidden, delete for real
+    other_ids = [p for p in conv['participants'] if p != user['id']]
+    if all(pid in hidden_for for pid in other_ids):
         await db.conversations.delete_one({'id': conv_id})
         await db.messages.delete_many({'conversation_id': conv_id})
+    else:
+        await db.conversations.update_one(
+            {'id': conv_id},
+            {'$addToSet': {'hidden_for': user['id']}},
+        )
     return {'deleted': True}
 
 

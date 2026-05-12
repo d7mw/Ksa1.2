@@ -1,0 +1,34 @@
+{
+  "summary": "Frontend-only Playwright UI testing of the new Direct Messages (DM) flow on the public preview URL. Created two fresh OTP-signup users (alice/bob), exercised: empty Messages page → new-message modal → user search → start conversation → send text message → message appears in thread → back-button → conversation now in list with correct preview & timestamp. Settings dm-privacy-selector pills (Everyone / Followers only) work and become green when active. Profile gear icon (own profile) navigates to /settings. Profile message icon (other user) opens/starts a conversation. Mobile 414×900 bottom nav still exposes a Messages link. ALL critical DM UI flows pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "BottomNav (mobile 414px)", "issues": ["The bottom-nav <a href='/messages'> link does not expose a data-testid. The spec recommended data-testid like 'bottomnav-messages' for testability. Same likely applies to Sidebar Messages nav — both still render an unread badge per code, but selecting them in tests requires href selectors. Non-blocking."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/test_reports/seed_dm_users.py",
+    "/app/backend/tests/test_messages.py",
+    "/app/test_reports/pytest/iter2_messages.xml"
+  ],
+  "action_items": [
+    "(Nice-to-have) Add data-testid='bottomnav-messages' to the Messages link in BottomNav.jsx and data-testid='sidebar-messages' to Sidebar.jsx for robust selector-based tests of the unread-badge.",
+    "(Already flagged in iteration_2 — still applicable) Server-side: short-circuit self-DM before insert; preserve participants on DELETE & filter via hidden_for; validate attachment.url prefix."
+  ],
+  "critical_code_review_comments": [
+    "Conversation.jsx onPickFile uses FileReader().readAsDataURL — fine, but the resulting base64 grows file size ~33%; the 4MB raw-size check is BEFORE encoding, so the final POST body for a 4MB file is ~5.3MB and may exceed server-side 'message_too_large'. Recommend either compressing/uploading via multipart or warning user at ~3MB.",
+    "Profile.jsx 'profile-message-btn' onClick uses messagesApi.start but swallows errors silently (`catch {/* ignore */}`). If the peer has dm_privacy='followers' and is not following the caller, the user sees nothing happen. Should show a toast / inline message.",
+    "Messages.jsx polls every 8s and Conversation.jsx every 5s without abort on unmount — risk of duplicate inflight requests when navigating fast. Consider AbortController or stale-state guards.",
+    "server.py is still 1285 lines — exceeds 700-line guideline. Split DM endpoints into routers/messages.py (carried over from iteration_2)."
+  ],
+  "updated_files": ["/app/memory/test_credentials.md", "/app/test_reports/seed_dm_users.py", "/app/test_reports/iteration_3.json"],
+  "success_rate": {"backend": "100% (17/17 from iter2, not re-run)", "frontend": "100% (all DM UI assertions passed)"},
+  "test_credentials": "Stored at /app/memory/test_credentials.md — alice/bob OTP-signup users.",
+  "seed_data_creation": "Created 2 fresh users via /api/auth/signup/start + signup/verify (OTP read from db.otps.code). They left one conversation with one message in the database (id: a423ef50882243b08233d1751a8d3535). Safe to leave (TEST_ prefix in emails).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "DM frontend is fully working end-to-end. Reusable seed script: /app/test_reports/seed_dm_users.py creates 2 random TEST_ users via OTP. Public URL: https://social-feed-269.preview.emergentagent.com. All required data-testids in spec are present in Messages.jsx, Conversation.jsx, NewMessageModal.jsx, Settings.jsx, Profile.jsx. The only missing data-testid is on BottomNav/Sidebar Messages link (currently selectable only via href='/messages').",
+  "rca of the issue": "N/A — no bugs found in the DM frontend flow."
+}

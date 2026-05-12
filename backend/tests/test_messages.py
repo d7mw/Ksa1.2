@@ -194,11 +194,9 @@ class TestStartConversation:
         r = requests.post(f"{API}/messages/conversations",
                           headers=_auth(alice["token"]),
                           json={"username": alice["username"]}, timeout=20)
-        # Allowed to open (block on send) - check can_send=False
-        assert r.status_code == 200
-        d = r.json()
-        assert d["can_send"] is False
-        assert d["block_reason"] == "cannot_dm_self"
+        # Self-DM is rejected outright so no dangling conversation row is created.
+        assert r.status_code == 400
+        assert r.json().get("detail") == "cannot_dm_self"
 
 
 # ---------------- list conversations ----------------
