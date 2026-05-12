@@ -198,7 +198,13 @@ const Profile = () => {
                   try {
                     const conv = await messagesApi.start(profile.username);
                     nav(`/messages/${conv.id}`);
-                  } catch {/* ignore */}
+                  } catch (e) {
+                    const code = e?.response?.data?.detail;
+                    if (code === 'cannot_dm_self') return;
+                    window.alert(lang === 'ar'
+                      ? 'تعذر بدء المحادثة. قد يكون هذا الحساب يستقبل الرسائل من المتابعين فقط.'
+                      : 'Could not start the conversation. This account may only accept messages from people it follows.');
+                  }
                 }}
                 className="btn-outline w-9 h-9 rounded-full font-bold text-sm flex items-center justify-center"
                 aria-label={lang === 'ar' ? 'مراسلة' : 'Message'}

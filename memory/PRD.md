@@ -12,54 +12,70 @@ User language: Arabic (always respond in Arabic).
 - Email: SendGrid (OTP + follow notifications)
 - PWA: standalone manifest + iOS meta tags
 
-## Implemented Features (as of 2026-05-12)
+## Implemented Features
 - JWT auth, email OTP signup, Google OAuth login, forgot-password flow
 - Tweets: create, like, retweet (toggle), reply, image upload (compressed client-side)
 - Follow system with email notifications, followers/following modal lists, real-time counts
 - Dynamic `/:username` profile routing with reserved-path protection
 - Admin dashboard: user mgmt, verification request approval, tweet moderation
 - Mobile-responsive layout, error boundaries, optimistic UI
-- N+1-free batched queries (`serialize_tweets`, batched authors/likes/retweets)
-- **Private accounts**: `is_private` toggle, `_filter_private_tweets` filters non-followers from feed/profile, `/tweets/{id}` returns 403 for non-allowed viewers (validated: 22/22 tests pass)
-- **Timezone fix**: Motor client `tz_aware=True`, `now_utc()` everywhere; `created_at` serialized with `+00:00`; frontend `parseUTC` + `timeAgo` shows `الآن` for posts <60s
-- **Logout**: Sidebar pill + Settings row, AppContext `logout()`
+- N+1-free batched queries
+- **Private accounts** (`is_private`): filters non-followers from feed/profile, 403 on tweet detail (22/22 tests)
+- **Timezone-aware** datetimes (`+00:00` ISO offset), frontend `parseUTC`+`timeAgo` shows `الآن` <60s
+- **Logout**: Sidebar pill + Settings row + AppContext `logout()`
 - **PWA**: standalone manifest, apple-touch-icon, iOS meta tags, maskable 512 icon
+- **Direct Messages (DMs)** (2026-05-12, 17/17 backend + frontend e2e tests):
+  - Conversation list `/messages`, conversation thread `/messages/:id`
+  - Text + image (auto-compressed) + arbitrary file attachments via base64
+  - `dm_privacy` user setting: `everyone` (default) or `followers` (followers-only)
+  - Privacy enforced on send (403 `dm_restricted_to_followers`), opening blocked convs shows explanation
+  - Unread badges in Sidebar + BottomNav + per-conversation row
+  - Soft-delete (hidden_for) preserves canonical participant list so reopening resurfaces same thread
+  - New-message modal with user search
+- **Settings access on mobile**: gear icon in Profile header (top-right) → /settings
+- **Message-from-profile**: small message button next to Follow on other users' profiles
 
 ## API Surface
-- `POST /api/auth/signup/start` `/verify`, `POST /api/auth/login`, `POST /api/auth/google`
-- `POST /api/auth/forgot/start` `/verify`
-- `GET/PATCH /api/users/me`, `GET /api/users/:username`, `GET /api/users/:username/tweets`
-- `POST /api/users/:id/follow`, `GET /api/users/:username/followers|following`
-- `GET /api/tweets/feed?tab=forYou|following|trending`, `POST /api/tweets`, `DELETE`, `POST :id/like|retweet`, `GET :id/replies`
-- `GET /api/notifications`
-- Admin: `GET /api/admin/users|tweets|verification-requests`, approve/reject/ban
+- Auth: `/auth/signup/start|verify`, `/auth/login`, `/auth/google`, `/auth/forgot-password/*`
+- Users: `GET/PATCH /users/me`, `GET /users/:username`, `GET /users/:username/tweets|followers|following`, `POST /users/:username/follow`
+- Tweets: `/tweets/feed?tab=forYou|following|trending`, CRUD, `:id/like|retweet|replies`
+- Notifications: `/notifications`, `/notifications/unread-count`
+- Search: `/search/tweets|users`
+- Admin: `/admin/users|tweets|verification-requests|stats`
+- **Messages (NEW)**:
+  - `GET /messages/conversations` — sorted by `last_message_at` desc, excludes `hidden_for` caller
+  - `POST /messages/conversations` `{username}` — start (idempotent), un-hides if previously hidden, 400 on self
+  - `GET /messages/unread-count`
+  - `GET /messages/conversations/:id?before=:msg_id`
+  - `POST /messages/conversations/:id` `{content, attachments[]}` — 403 if recipient dm_privacy=followers and viewer not followed
+  - `POST /messages/conversations/:id/read`
+  - `DELETE /messages/conversations/:id` — hides for caller; if both hide, real delete
 
-## DB Schema
-- `users`: id, email, username, name, bio, avatar, cover, verified, is_private, email_notifications_disabled, followers_count, following_count, created_at
-- `tweets`: id, user_id, content, image, parent_id, created_at, likes_count, retweets_count, replies_count, views
-- `follows`, `likes`, `retweets`: { user_id, target_id, created_at }
-- `notifications`: id, recipient_id, actor_id, type, tweet_id, created_at, read
-- `otps`, `password_resets`: TTL-expiring codes
+## DB Schema additions
+- `users.dm_privacy`: 'everyone' | 'followers' (default 'everyone')
+- `conversations`: `{id, participants:[a,b] sorted, created_at, last_message_at, last_message_preview, last_sender_id, hidden_for:[user_id]}`
+- `messages`: `{id, conversation_id, sender_id, content, attachments:[{type:'image|file', url, name, size, mime}], created_at, read_by:[user_id]}`
 
 ## Roadmap
 ### P1
-- [ ] Stripe (or Tap/HyperPay) integration for paid verification (25 SAR/month, 200 SAR/year). Currently admin-manual approval.
+- [ ] Stripe (or Tap/HyperPay) integration for paid verification (25/200 SAR). Currently admin-manual.
 
 ### P2
-- [ ] Refactor `/app/backend/server.py` (1041 lines) into modular routers: `routes/auth.py`, `routes/tweets.py`, `routes/users.py`, `routes/admin.py`, `routes/notifications.py`.
-- [ ] Profile UI: show "🔒 Private account" banner + Follow CTA when visiting a private profile the viewer doesn't follow (currently shows empty tab silently — backend already returns `is_private` flag).
-- [ ] Real-time notifications (WebSocket / SSE)
-- [ ] Direct messages
-- [ ] Hashtag pages & trending algorithm
-- [ ] Bookmarks
+- [ ] Refactor `/app/backend/server.py` (1290+ lines) → modular routers (auth, tweets, users, admin, messages).
+- [ ] Validate attachment.url format (data: or https:) on backend.
+- [ ] Show toast (use `sonner`) instead of `window.alert` for DM/profile errors.
+- [ ] DM Notifications: SendGrid email on first message from a new contact.
+- [ ] Profile UI: show "🔒 حساب خاص" banner + Follow CTA on private profiles you don't follow.
+- [ ] Real-time DMs via WebSocket/SSE (currently 5–8s polling).
+- [ ] Hashtag pages, bookmarks list, trending algo.
 
 ## Deployment
-- Production: `https://ksa1.com` / `https://social-feed-269.emergent.host`
+- Production: `https://ksa1.sa` / `https://social-feed-269.emergent.host`
 - Preview: `https://social-feed-269.preview.emergentagent.com`
-- **Any preview changes require Redeploy to reflect on production.**
+- **Any preview changes require Redeploy to push to production.**
 
-## Critical Notes for Future Agents
-- Always append `Z` only when string lacks tz info; `parseUTC` in `/app/frontend/src/utils/dates.js` handles both `Z` and `+00:00`.
-- Reserved usernames enforced at: signup, check-username, profile patch. List in `/app/frontend/src/utils/reservedPaths.js` (mirror in backend schemas).
-- N+1 prevention: always use `$in` batched queries when serializing lists.
-- Tz-aware: Motor client built with `tz_aware=True`. Don't downgrade.
+## Critical Notes
+- `parseUTC` handles both `Z` and `+00:00` suffixes — Motor `tz_aware=True` returns the latter.
+- Reserved usernames enforced at signup, check-username, profile patch.
+- N+1 prevention: always `$in` batched queries when serializing lists.
+- DM `_can_dm` returns True if `recipient.dm_privacy == 'everyone'` OR `recipient follows sender` (Twitter semantics: you can DM people who follow you).
