@@ -14,6 +14,7 @@ import Profile from './pages/Profile';
 import TweetDetail from './pages/TweetDetail';
 import Bookmarks from './pages/Bookmarks';
 import Admin from './pages/Admin';
+import Settings from './pages/Settings';
 import { isReservedPath, isValidUsernameFormat } from './utils/reservedPaths';
 
 const Protected = ({ children }) => {
@@ -58,7 +59,7 @@ const AppShell = () => {
       <Route path="/messages" element={<Protected><Messages /></Protected>} />
       <Route path="/bookmarks" element={<Protected><Bookmarks /></Protected>} />
       <Route path="/profile" element={<Protected><Profile /></Protected>} />
-      <Route path="/settings" element={<Protected><Profile /></Protected>} />
+      <Route path="/settings" element={<Protected><Settings /></Protected>} />
       <Route path="/admin" element={<Protected><Admin /></Protected>} />
       <Route path="/tweet/:id" element={<Protected><TweetDetail /></Protected>} />
 

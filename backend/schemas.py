@@ -83,6 +83,8 @@ class UpdateProfile(BaseModel):
     location: Optional[str] = Field(default=None, max_length=30)
     avatar: Optional[str] = None
     cover: Optional[str] = None
+    is_private: Optional[bool] = None
+    email_notifications_disabled: Optional[bool] = None
 
     @field_validator('username')
     @classmethod

@@ -5,6 +5,7 @@ import { notificationsApi } from '../api';
 import { t } from '../i18n';
 import { Heart, UserPlus, Repeat2, MessageCircle, Settings, BadgeCheck, Loader2 } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
+import { formatDateTime } from '../utils/dates';
 
 const typeIcon = {
   like: <Heart size={26} className="text-pink-500 fill-pink-500" />,
@@ -76,7 +77,7 @@ const Notifications = () => {
               <span className="text-zinc-400">{text(n)}</span>
             </p>
             {n.preview && <p className="text-sm text-zinc-500 mt-1">{n.preview}</p>}
-            <p className="text-xs text-zinc-500 mt-1">{new Date(n.created_at).toLocaleString(lang === 'ar' ? 'ar-SA' : 'en-US')}</p>
+            <p className="text-xs text-zinc-500 mt-1">{formatDateTime(n.created_at, lang)}</p>
           </div>
         </div>
       ))}

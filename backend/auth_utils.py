@@ -90,6 +90,8 @@ def public_user(u: dict, viewer_id: str | None = None) -> dict:
         'verified': u.get('verified', False),
         'verification_requested': u.get('verification_requested', False),
         'is_admin': u.get('email', '').lower() == ADMIN_EMAIL,
+        'is_private': u.get('is_private', False),
+        'email_notifications_disabled': u.get('email_notifications_disabled', False) if viewer_id == u['id'] else None,
         'followers_count': u.get('followers_count', 0),
         'following_count': u.get('following_count', 0),
         'created_at': u.get('created_at'),

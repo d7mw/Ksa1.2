@@ -26,9 +26,10 @@ from auth_utils import (
 from email_service import send_otp_email, send_password_reset_email, send_new_follower_email
 import asyncio
 
-# Mongo
+# Mongo - tz_aware=True ensures all datetimes come back as UTC-aware so they
+# serialize to ISO with timezone offset (preventing local-time misinterpretation).
 mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(mongo_url, tz_aware=True)
 db = client[os.environ['DB_NAME']]
 
 app = FastAPI(title='ksa1 API')
@@ -59,6 +60,28 @@ async def ensure_indexes():
     await db.otps.create_index([('email', ASCENDING)])
     await db.password_resets.create_index([('expires_at', ASCENDING)], expireAfterSeconds=0)
     await db.password_resets.create_index([('email', ASCENDING)])
+
+
+async def can_view_user_posts(target_user: dict, viewer_id: Optional[str]) -> bool:
+    """Returns True if viewer can see target_user's posts.
+    Public accounts: always visible.
+    Private accounts: visible only to the user themselves, the admin, or approved followers.
+    """
+    if not target_user:
+        return False
+    if not target_user.get('is_private'):
+        return True
+    if not viewer_id:
+        return False
+    if viewer_id == target_user['id']:
+        return True
+    # Admin override
+    viewer = await db.users.find_one({'id': viewer_id})
+    if viewer and viewer.get('email', '').lower() == ADMIN_EMAIL:
+        return True
+    # Follower check
+    follow_doc = await db.follows.find_one({'follower_id': viewer_id, 'following_id': target_user['id']})
+    return bool(follow_doc)
 
 
 async def serialize_tweet(tw: dict, viewer_id: Optional[str]) -> dict:
@@ -373,6 +396,10 @@ async def update_me(payload: UpdateProfile, user=Depends(current_user)):
         updates['avatar'] = payload.avatar
     if payload.cover is not None:
         updates['cover'] = payload.cover
+    if payload.is_private is not None:
+        updates['is_private'] = bool(payload.is_private)
+    if payload.email_notifications_disabled is not None:
+        updates['email_notifications_disabled'] = bool(payload.email_notifications_disabled)
 
     if updates:
         await db.users.update_one({'id': user['id']}, {'$set': updates})
@@ -585,13 +612,36 @@ async def feed(tab: str = 'forYou', limit: int = 50, user=Depends(optional_user)
         following_ids = [f['following_id'] for f in follows] + [user['id']]
         q['user_id'] = {'$in': following_ids}
     elif tab == 'trending':
-        cursor = db.tweets.find({'parent_id': None}).sort([('likes_count', -1)]).limit(limit)
-        items = await cursor.to_list(limit)
-        return await serialize_tweets(items, viewer_id)
+        cursor = db.tweets.find({'parent_id': None}).sort([('likes_count', -1)]).limit(limit * 2)
+        items = await cursor.to_list(limit * 2)
+        items = await _filter_private_tweets(items, viewer_id)
+        return await serialize_tweets(items[:limit], viewer_id)
 
-    cursor = db.tweets.find(q).sort([('created_at', -1)]).limit(limit)
-    items = await cursor.to_list(limit)
-    return await serialize_tweets(items, viewer_id)
+    cursor = db.tweets.find(q).sort([('created_at', -1)]).limit(limit * 2)
+    items = await cursor.to_list(limit * 2)
+    if tab != 'following':
+        items = await _filter_private_tweets(items, viewer_id)
+    return await serialize_tweets(items[:limit], viewer_id)
+
+
+async def _filter_private_tweets(items: list, viewer_id: Optional[str]) -> list:
+    """Remove tweets from private accounts the viewer can't see."""
+    if not items:
+        return items
+    author_ids = list({t['user_id'] for t in items})
+    private_authors = await db.users.find({'id': {'$in': author_ids}, 'is_private': True}).to_list(len(author_ids))
+    if not private_authors:
+        return items
+    private_ids = {u['id'] for u in private_authors}
+    accessible_private = set()
+    if viewer_id:
+        accessible_private.add(viewer_id)
+        follows = await db.follows.find({'follower_id': viewer_id, 'following_id': {'$in': list(private_ids)}}).to_list(len(private_ids))
+        accessible_private.update(f['following_id'] for f in follows)
+        viewer = await db.users.find_one({'id': viewer_id})
+        if viewer and viewer.get('email', '').lower() == ADMIN_EMAIL:
+            accessible_private.update(private_ids)
+    return [t for t in items if t['user_id'] not in private_ids or t['user_id'] in accessible_private]
 
 
 @api.get('/tweets/{tweet_id}')
@@ -599,9 +649,12 @@ async def get_tweet(tweet_id: str, user=Depends(optional_user)):
     tw = await db.tweets.find_one({'id': tweet_id})
     if not tw:
         raise HTTPException(404, 'tweet_not_found')
+    author = await db.users.find_one({'id': tw['user_id']})
+    viewer_id = user['id'] if user else None
+    if author and not await can_view_user_posts(author, viewer_id):
+        raise HTTPException(403, 'private_account')
     await db.tweets.update_one({'id': tweet_id}, {'$inc': {'views': 1}})
     tw['views'] = tw.get('views', 0) + 1
-    viewer_id = user['id'] if user else None
     return await serialize_tweet(tw, viewer_id)
 
 
@@ -696,6 +749,13 @@ async def user_tweets(username: str, kind: str = 'posts', user=Depends(optional_
         raise HTTPException(404, 'user_not_found')
     viewer_id = user['id'] if user else None
 
+    # Private-account gate: only owner / admin / followers can see posts
+    if not await can_view_user_posts(u, viewer_id):
+        return {'private': True, 'tweets': []} if False else []  # return empty list, but frontend will detect via user.is_private
+    return await _user_tweets_payload(u, kind, viewer_id)
+
+
+async def _user_tweets_payload(u: dict, kind: str, viewer_id: Optional[str]):
     if kind == 'media':
         cursor = db.tweets.find({'user_id': u['id'], 'image': {'$ne': None}}).sort([('created_at', -1)])
         items = await cursor.to_list(200)
@@ -711,7 +771,6 @@ async def user_tweets(username: str, kind: str = 'posts', user=Depends(optional_
         ids = [l['tweet_id'] for l in likes]
         cursor = db.tweets.find({'id': {'$in': ids}})
         items = await cursor.to_list(200)
-        # Preserve like-order
         order = {tid: i for i, tid in enumerate(ids)}
         items.sort(key=lambda t: order.get(t['id'], 999999))
         return await serialize_tweets(items, viewer_id)
@@ -727,7 +786,6 @@ async def user_tweets(username: str, kind: str = 'posts', user=Depends(optional_
         rt_list = await db.tweets.find({'id': {'$in': rt_tweet_ids}}).to_list(len(rt_tweet_ids))
         rt_tweets_by_id = {t['id']: t for t in rt_list}
 
-    # Build combined sortable list: (sort_time, tweet_doc, retweeter_or_None)
     combined = []
     for t in own_items:
         combined.append((t['created_at'], t, None))
@@ -735,7 +793,6 @@ async def user_tweets(username: str, kind: str = 'posts', user=Depends(optional_
         t = rt_tweets_by_id.get(r['tweet_id'])
         if t:
             combined.append((r['created_at'], t, u))
-    # Sort by sort_time desc
     combined.sort(key=lambda x: x[0], reverse=True)
     combined = combined[:200]
 

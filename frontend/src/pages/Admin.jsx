@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Users, MessageSquare, BadgeCheck, Ban, Trash2, Check, X, Search, Shield, Loader2, AlertCircle,
 } from 'lucide-react';
+import { formatDateTime } from '../utils/dates';
 
 const StatCard = ({ icon: Icon, label, value, color }) => (
   <div className="bg-[#0c1410] border border-zinc-900 rounded-2xl p-5">
@@ -162,7 +163,7 @@ const Admin = () => {
                   <p className="text-sm"><b>{tw.author?.name}</b> <span className="text-zinc-500">@{tw.author?.username}</span></p>
                   <p className="text-[15px] mt-0.5 whitespace-pre-wrap break-words">{tw.content}</p>
                   {tw.image && <img src={tw.image} alt="" className="mt-2 max-h-40 rounded-lg" />}
-                  <p className="text-xs text-zinc-500 mt-1">{new Date(tw.created_at).toLocaleString(lang === 'ar' ? 'ar-SA' : 'en-US')} · {tw.likes_count} likes</p>
+                  <p className="text-xs text-zinc-500 mt-1">{formatDateTime(tw.created_at, lang)} · {tw.likes_count} likes</p>
                 </div>
                 <button onClick={() => handleDeleteTweet(tw.id)} className="p-2 rounded-full hover:bg-red-500/10 hover:text-red-500 transition-colors h-fit"><Trash2 size={18} /></button>
               </div>

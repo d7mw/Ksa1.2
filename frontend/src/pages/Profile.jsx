@@ -11,6 +11,7 @@ import { ArrowLeft, Calendar, MapPin, BadgeCheck, Clock, Loader2 } from 'lucide-
 import { useNavigate, useParams } from 'react-router-dom';
 import { usersApi } from '../api';
 import { isReservedPath, isValidUsernameFormat } from '../utils/reservedPaths';
+import { formatMonthYear } from '../utils/dates';
 
 const VerifiedIcon = ({ size = 20 }) => (
   <svg viewBox="0 0 24 24" className="verified-badge fill-current flex-shrink-0" width={size} height={size}>
@@ -195,7 +196,7 @@ const Profile = () => {
         <div className="flex flex-wrap gap-4 mt-3 text-sm text-zinc-500">
           {profile.location && <span className="flex items-center gap-1"><MapPin size={14} /> {profile.location}</span>}
           {profile.created_at && (
-            <span className="flex items-center gap-1"><Calendar size={14} /> {t(lang, 'joined')} {new Date(profile.created_at).toLocaleDateString(lang === 'ar' ? 'ar-SA' : 'en-US', { year: 'numeric', month: 'long' })}</span>
+            <span className="flex items-center gap-1"><Calendar size={14} /> {t(lang, 'joined')} {formatMonthYear(profile.created_at, lang)}</span>
           )}
         </div>
         <div className="flex gap-4 mt-3 text-sm">

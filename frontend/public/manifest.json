@@ -1,0 +1,50 @@
+{
+  "name": "ksa1 — منصة التغريد السعودية",
+  "short_name": "ksa1",
+  "description": "ksa1 — Saudi microblogging platform",
+  "start_url": "/home",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "fullscreen", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#006C35",
+  "lang": "ar",
+  "dir": "rtl",
+  "categories": ["social", "news"],
+  "icons": [
+    {
+      "src": "/favicon-16.png",
+      "type": "image/png",
+      "sizes": "16x16"
+    },
+    {
+      "src": "/favicon-32.png",
+      "type": "image/png",
+      "sizes": "32x32"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
+    },
+    {
+      "src": "/logo192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo512-maskable.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ]
+}

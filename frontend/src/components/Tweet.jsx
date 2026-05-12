@@ -3,26 +3,13 @@ import { MessageCircle, Repeat2, Heart, BarChart3, Share, MoreHorizontal, Bookma
 import { useApp } from '../contexts/AppContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { tweetsApi } from '../api';
+import { timeAgo } from '../utils/dates';
 
 const formatNum = (n) => {
   if (!n) return 0;
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
   if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
   return n;
-};
-
-const timeAgo = (iso, lang) => {
-  if (!iso) return '';
-  const date = new Date(iso);
-  const sec = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (sec < 60) return lang === 'ar' ? 'الآن' : 'now';
-  const min = Math.floor(sec / 60);
-  if (min < 60) return lang === 'ar' ? `منذ ${min} د` : `${min}m`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return lang === 'ar' ? `منذ ${h} س` : `${h}h`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return lang === 'ar' ? `منذ ${d} ي` : `${d}d`;
-  return date.toLocaleDateString();
 };
 
 const VerifiedIcon = () => (

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Home, Search, Bell, Mail, Bookmark, User, MoreHorizontal, Feather, LogOut, Languages, Shield } from 'lucide-react';
+import { Home, Search, Bell, Mail, Bookmark, User, MoreHorizontal, Feather, LogOut, Languages, Shield, Settings as SettingsIcon } from 'lucide-react';
 import { LOGO_URL } from '../mock';
 import { useApp } from '../contexts/AppContext';
 import { t } from '../i18n';
@@ -30,6 +30,7 @@ const Sidebar = () => {
   const { lang, toggleLang, user, logout } = useApp();
   const nav = useNavigate();
   const [unread, setUnread] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -41,7 +42,11 @@ const Sidebar = () => {
 
   if (!user) return null;
 
-  const handleLogout = () => { logout(); nav('/login'); };
+  const handleLogout = () => {
+    if (!window.confirm(lang === 'ar' ? 'هل تريد تسجيل الخروج؟' : 'Sign out from ksa1?')) return;
+    logout();
+    nav('/login');
+  };
   const goCompose = () => {
     if (window.location.pathname === '/home') {
       const el = document.querySelector('textarea');
@@ -68,13 +73,14 @@ const Sidebar = () => {
           {user.is_admin && (
             <NavItem to="/admin" icon={Shield} label={lang === 'ar' ? 'لوحة الأدمن' : 'Admin'} />
           )}
+          <NavItem to="/settings" icon={SettingsIcon} label={lang === 'ar' ? 'الإعدادات' : 'Settings'} />
           <button onClick={toggleLang} className="nav-pill flex items-center gap-4 px-4 py-3 rounded-full text-xl text-zinc-100">
             <Languages size={26} />
             <span className="hidden xl:inline">{lang === 'ar' ? 'English' : 'العربية'}</span>
           </button>
-          <button className="nav-pill flex items-center gap-4 px-4 py-3 rounded-full text-xl text-zinc-100">
-            <MoreHorizontal size={26} />
-            <span className="hidden xl:inline">{t(lang, 'more')}</span>
+          <button onClick={handleLogout} className="nav-pill flex items-center gap-4 px-4 py-3 rounded-full text-xl text-zinc-100 hover:text-red-400">
+            <LogOut size={26} />
+            <span className="hidden xl:inline">{lang === 'ar' ? 'تسجيل الخروج' : 'Sign out'}</span>
           </button>
         </nav>
 
