@@ -72,6 +72,17 @@ export const searchApi = {
   users: (q) => api.get('/search/users', { params: { q } }).then((r) => r.data),
 };
 
+// Direct Messages
+export const messagesApi = {
+  conversations: () => api.get('/messages/conversations').then((r) => r.data),
+  unreadCount: () => api.get('/messages/unread-count').then((r) => r.data),
+  start: (username) => api.post('/messages/conversations', { username }).then((r) => r.data),
+  get: (id, before) => api.get(`/messages/conversations/${id}`, { params: before ? { before } : {} }).then((r) => r.data),
+  send: (id, data) => api.post(`/messages/conversations/${id}`, data).then((r) => r.data),
+  markRead: (id) => api.post(`/messages/conversations/${id}/read`).then((r) => r.data),
+  remove: (id) => api.delete(`/messages/conversations/${id}`).then((r) => r.data),
+};
+
 // Admin
 export const adminApi = {
   stats: () => api.get('/admin/stats').then((r) => r.data),

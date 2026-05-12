@@ -7,9 +7,10 @@ import FollowListModal from '../components/FollowListModal';
 import UserNotFound from '../components/UserNotFound';
 import { useApp } from '../contexts/AppContext';
 import { t } from '../i18n';
-import { ArrowLeft, Calendar, MapPin, BadgeCheck, Clock, Loader2 } from 'lucide-react';
+import { ArrowLeft, Calendar, MapPin, BadgeCheck, Clock, Loader2, Settings as SettingsIcon, MessageSquare } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { usersApi } from '../api';
+import { messagesApi } from '../api';
 import { isReservedPath, isValidUsernameFormat } from '../utils/reservedPaths';
 import { formatMonthYear } from '../utils/dates';
 
@@ -145,12 +146,22 @@ const Profile = () => {
         <button onClick={() => nav(-1)} className="p-2 rounded-full hover:bg-white/5 transition-colors">
           <ArrowLeft size={20} className="flip-rtl" />
         </button>
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="text-lg font-extrabold flex items-center gap-1">
             {profile.name} {profile.verified && <VerifiedIcon size={18} />}
           </h1>
           <p className="text-xs text-zinc-500">{tweets.length} {t(lang, 'posts')}</p>
         </div>
+        {isMe && (
+          <button
+            data-testid="profile-settings-btn"
+            onClick={() => nav('/settings')}
+            className="p-2 rounded-full hover:bg-white/5 transition-colors"
+            aria-label={lang === 'ar' ? 'الإعدادات' : 'Settings'}
+          >
+            <SettingsIcon size={20} />
+          </button>
+        )}
       </header>
 
       <div className="relative">
@@ -180,9 +191,24 @@ const Profile = () => {
               <button onClick={() => setEditOpen(true)} className="btn-outline px-4 py-1.5 rounded-full font-bold text-sm">{t(lang, 'edit')}</button>
             </>
           ) : (
-            <button onClick={handleFollow} className={profile.is_following ? 'btn-outline px-5 py-1.5 rounded-full font-bold text-sm' : 'bg-white text-black hover:bg-zinc-200 transition-colors px-5 py-1.5 rounded-full font-bold text-sm'}>
-              {profile.is_following ? t(lang, 'unfollow') : t(lang, 'follow')}
-            </button>
+            <>
+              <button
+                data-testid="profile-message-btn"
+                onClick={async () => {
+                  try {
+                    const conv = await messagesApi.start(profile.username);
+                    nav(`/messages/${conv.id}`);
+                  } catch {/* ignore */}
+                }}
+                className="btn-outline w-9 h-9 rounded-full font-bold text-sm flex items-center justify-center"
+                aria-label={lang === 'ar' ? 'مراسلة' : 'Message'}
+              >
+                <MessageSquare size={16} />
+              </button>
+              <button onClick={handleFollow} className={profile.is_following ? 'btn-outline px-5 py-1.5 rounded-full font-bold text-sm' : 'bg-white text-black hover:bg-zinc-200 transition-colors px-5 py-1.5 rounded-full font-bold text-sm'}>
+                {profile.is_following ? t(lang, 'unfollow') : t(lang, 'follow')}
+              </button>
+            </>
           )}
         </div>
       </div>

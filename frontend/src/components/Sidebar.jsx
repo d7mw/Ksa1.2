@@ -4,7 +4,7 @@ import { Home, Search, Bell, Mail, Bookmark, User, MoreHorizontal, Feather, LogO
 import { LOGO_URL } from '../mock';
 import { useApp } from '../contexts/AppContext';
 import { t } from '../i18n';
-import { notificationsApi } from '../api';
+import { notificationsApi, messagesApi } from '../api';
 
 const NavItem = ({ to, icon: Icon, label, badge }) => (
   <NavLink to={to} className={({ isActive }) =>
@@ -30,13 +30,17 @@ const Sidebar = () => {
   const { lang, toggleLang, user, logout } = useApp();
   const nav = useNavigate();
   const [unread, setUnread] = useState(0);
+  const [msgUnread, setMsgUnread] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     if (!user) return;
-    const fetchUnread = () => notificationsApi.unreadCount().then((d) => setUnread(d.count)).catch(() => {});
+    const fetchUnread = () => {
+      notificationsApi.unreadCount().then((d) => setUnread(d.count)).catch(() => {});
+      messagesApi.unreadCount().then((d) => setMsgUnread(d.count || 0)).catch(() => {});
+    };
     fetchUnread();
-    const t = setInterval(fetchUnread, 30000);
+    const t = setInterval(fetchUnread, 15000);
     return () => clearInterval(t);
   }, [user]);
 
@@ -67,7 +71,7 @@ const Sidebar = () => {
           <NavItem to="/home" icon={Home} label={t(lang, 'home')} />
           <NavItem to="/explore" icon={Search} label={t(lang, 'explore')} />
           <NavItem to="/notifications" icon={Bell} label={t(lang, 'notifications')} badge={unread} />
-          <NavItem to="/messages" icon={Mail} label={t(lang, 'messages')} />
+          <NavItem to="/messages" icon={Mail} label={t(lang, 'messages')} badge={msgUnread} />
           <NavItem to="/bookmarks" icon={Bookmark} label={t(lang, 'bookmarks')} />
           <NavItem to="/profile" icon={User} label={t(lang, 'profile')} />
           {user.is_admin && (

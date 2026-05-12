@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 import { useApp } from '../contexts/AppContext';
 import { useNavigate } from 'react-router-dom';
 import { usersApi } from '../api';
-import { Lock, Mail, LogOut, Languages, ChevronRight, Loader2, ShieldCheck } from 'lucide-react';
+import { Lock, Mail, LogOut, Languages, ChevronRight, Loader2, ShieldCheck, MessageSquare } from 'lucide-react';
 
 const Toggle = ({ checked, onChange, disabled }) => (
   <button
@@ -42,6 +42,7 @@ const Settings = () => {
   const nav = useNavigate();
   const [savingPriv, setSavingPriv] = useState(false);
   const [savingEmail, setSavingEmail] = useState(false);
+  const [savingDm, setSavingDm] = useState(false);
 
   if (!user) {
     nav('/login');
@@ -74,6 +75,20 @@ const Settings = () => {
     } finally { setSavingEmail(false); }
   };
 
+  const setDmPrivacy = async (value) => {
+    if (savingDm) return;
+    const prev = user.dm_privacy || 'everyone';
+    if (prev === value) return;
+    setSavingDm(true);
+    setUser((u) => u ? { ...u, dm_privacy: value } : u);
+    try {
+      const updated = await usersApi.updateMe({ dm_privacy: value });
+      setUser((u) => u ? { ...u, ...updated } : u);
+    } catch (e) {
+      setUser((u) => u ? { ...u, dm_privacy: prev } : u);
+    } finally { setSavingDm(false); }
+  };
+
   const handleLogout = () => {
     if (!window.confirm(lang === 'ar' ? 'هل تريد تسجيل الخروج؟' : 'Sign out from ksa1?')) return;
     logout();
@@ -104,6 +119,37 @@ const Settings = () => {
               : <Toggle checked={!!user.is_private} onChange={togglePrivate} disabled={savingPriv} />
           }
         />
+        <div className="px-4 py-4 border-b border-zinc-900">
+          <div className="flex items-start gap-4">
+            <MessageSquare size={20} className="text-zinc-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-[15px]">{lang === 'ar' ? 'من يمكنه مراسلتك مباشرة' : 'Who can message you'}</p>
+              <p className="text-xs text-zinc-500 mt-0.5 mb-3">
+                {lang === 'ar' ? 'تحكم في الرسائل الخاصة الواردة.' : 'Control who can DM you directly.'}
+              </p>
+              <div className="flex gap-2" data-testid="dm-privacy-selector">
+                {[
+                  { v: 'everyone', label: lang === 'ar' ? 'الجميع' : 'Everyone' },
+                  { v: 'followers', label: lang === 'ar' ? 'المتابعون فقط' : 'Followers only' },
+                ].map((opt) => {
+                  const active = (user.dm_privacy || 'everyone') === opt.v;
+                  return (
+                    <button
+                      key={opt.v}
+                      data-testid={`dm-privacy-${opt.v}`}
+                      onClick={() => setDmPrivacy(opt.v)}
+                      disabled={savingDm}
+                      className={`px-4 py-1.5 rounded-full text-sm font-bold border transition-colors ${active ? 'bg-green-600 text-white border-green-600' : 'bg-transparent text-zinc-300 border-zinc-700 hover:border-zinc-500'}`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+                {savingDm && <Loader2 size={16} className="self-center animate-spin text-green-500" />}
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       {/* Notifications */}

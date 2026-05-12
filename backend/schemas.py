@@ -85,13 +85,29 @@ class UpdateProfile(BaseModel):
     cover: Optional[str] = None
     is_private: Optional[bool] = None
     email_notifications_disabled: Optional[bool] = None
+    dm_privacy: Optional[str] = Field(default=None, pattern=r'^(everyone|followers)$')
+
+
+class MessageAttachment(BaseModel):
+    type: str = Field(pattern=r'^(image|file)$')
+    url: str  # base64 data url or remote url
+    name: Optional[str] = None
+    size: Optional[int] = None
+    mime: Optional[str] = None
+
+
+class ConversationStart(BaseModel):
+    username: str
 
     @field_validator('username')
     @classmethod
-    def validate_username(cls, v):
-        if v is None:
-            return v
-        return _validate_username_str(v)
+    def _norm(cls, v):
+        return v.strip().lstrip('@').lower()
+
+
+class MessageCreate(BaseModel):
+    content: str = Field(default='', max_length=2000)
+    attachments: list[MessageAttachment] = Field(default_factory=list, max_length=4)
 
 
 class TweetCreate(BaseModel):

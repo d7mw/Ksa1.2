@@ -10,6 +10,7 @@ import Login from './pages/Login';
 import Explore from './pages/Explore';
 import Notifications from './pages/Notifications';
 import Messages from './pages/Messages';
+import Conversation from './pages/Conversation';
 import Profile from './pages/Profile';
 import TweetDetail from './pages/TweetDetail';
 import Bookmarks from './pages/Bookmarks';
@@ -57,6 +58,7 @@ const AppShell = () => {
       <Route path="/explore" element={<Protected><Explore /></Protected>} />
       <Route path="/notifications" element={<Protected><Notifications /></Protected>} />
       <Route path="/messages" element={<Protected><Messages /></Protected>} />
+      <Route path="/messages/:conversationId" element={<Protected><Conversation /></Protected>} />
       <Route path="/bookmarks" element={<Protected><Bookmarks /></Protected>} />
       <Route path="/profile" element={<Protected><Profile /></Protected>} />
       <Route path="/settings" element={<Protected><Settings /></Protected>} />

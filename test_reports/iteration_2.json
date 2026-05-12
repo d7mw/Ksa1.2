@@ -1,0 +1,34 @@
+{
+  "summary": "Backend-only testing of new Direct Messages (DM) feature. Authored /app/backend/tests/test_messages.py covering dm_privacy field, conversation start (create/idempotent/404/self), conversation list, send (text/attachments/empty), privacy enforcement (followers-only + everyone + self), get conversation (chronological + ?before pagination + non-participant 404), read + unread-count, and delete conversation (hides for caller, peer unaffected). All 17 tests pass against the public REACT_APP_BACKEND_URL.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/messages/conversations/{id}", "issue": "Implementation mutates the canonical-sorted `participants` array (removes caller). This breaks the idempotent-lookup invariant: if the caller later POSTs /messages/conversations with the same peer, _conv_key([caller, peer]) won't match the existing doc (which now has only [peer]), so a NEW conversation is created instead of restoring the old one. The `hidden_for` array is written but never read anywhere. Consider keeping participants intact and filtering with `hidden_for` in list/start instead."},
+      {"endpoint": "POST /api/messages/conversations (self)", "issue": "Opening a conversation with yourself returns 200 with can_send=false/cannot_dm_self, but also INSERTS a conversation doc with participants=[my_id, my_id]. That's a dangling row that will never be cleaned up. Recommend short-circuiting before the insert when sender == target."},
+      {"endpoint": "POST /api/messages/conversations/{id}", "issue": "MessageAttachment.url is not validated as a base64 data URL or http(s) URL — any free-form string up to ~8MB is accepted. Recommend regex/prefix validation."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_messages.py",
+    "/app/test_reports/pytest/iter2_messages.xml"
+  ],
+  "action_items": [
+    "(optional) Fix DELETE conversation to preserve `participants` and use `hidden_for` for filtering, so re-opening the same DM resurfaces the old thread instead of creating a duplicate.",
+    "(optional) Short-circuit self-DM in POST /messages/conversations before inserting a dummy row.",
+    "(optional) Validate MessageAttachment.url format (data: or https:)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 1270 lines — exceeds the 700-line guideline. Split DM endpoints into routers/messages.py.",
+    "_can_dm correctly interprets 'followers' as 'recipient must follow sender' (Twitter-style: you can DM people who follow you).",
+    "Conversation list endpoint does not filter out conversations the caller has hidden via DELETE; this currently works only because DELETE removes the caller from `participants` (and the query filters by participants). If the DELETE behavior is changed (recommended above), the list query also needs to exclude convs where caller is in `hidden_for`.",
+    "messages query in get_conversation uses sort desc then reverses — fine for small pages, but consider a compound index on (conversation_id, created_at) DESC for pagination. (Index already exists ASC; reverse sort still uses it.)"
+  ],
+  "updated_files": ["/app/backend/tests/test_messages.py"],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "not tested"},
+  "test_credentials": "OTP-signup users with TEST_alice_*, TEST_bob_*, TEST_charlie_* prefixes — auto-cleaned by module fixture.",
+  "seed_data_creation": "Tests create 3 throwaway users + their conversations/messages per run, all deleted in module teardown (users, follows, conversations, messages by id).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "DM feature passes all 17 backend tests (privacy/CRUD/pagination/read-state/delete). Three non-blocking code-quality issues flagged. Run: pytest /app/backend/tests/test_messages.py -v"
+}

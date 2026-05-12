@@ -18,6 +18,7 @@ from schemas import (
     SignupStart, SignupVerify, LoginRequest, GoogleAuth,
     UpdateProfile, TweetCreate, UsernameCheck, new_id,
     ForgotPasswordStart, ForgotPasswordVerify,
+    ConversationStart, MessageCreate,
 )
 from auth_utils import (
     hash_password, verify_password, create_token, current_user,
@@ -60,6 +61,10 @@ async def ensure_indexes():
     await db.otps.create_index([('email', ASCENDING)])
     await db.password_resets.create_index([('expires_at', ASCENDING)], expireAfterSeconds=0)
     await db.password_resets.create_index([('email', ASCENDING)])
+    # Direct messages
+    await db.conversations.create_index([('participants', ASCENDING)])
+    await db.conversations.create_index([('last_message_at', ASCENDING)])
+    await db.messages.create_index([('conversation_id', ASCENDING), ('created_at', ASCENDING)])
 
 
 async def can_view_user_posts(target_user: dict, viewer_id: Optional[str]) -> bool:
@@ -400,6 +405,8 @@ async def update_me(payload: UpdateProfile, user=Depends(current_user)):
         updates['is_private'] = bool(payload.is_private)
     if payload.email_notifications_disabled is not None:
         updates['email_notifications_disabled'] = bool(payload.email_notifications_disabled)
+    if payload.dm_privacy is not None:
+        updates['dm_privacy'] = payload.dm_privacy
 
     if updates:
         await db.users.update_one({'id': user['id']}, {'$set': updates})
@@ -1009,6 +1016,227 @@ async def admin_delete_tweet(tweet_id: str, _=Depends(require_admin)):
     await db.tweets.delete_many({'parent_id': tweet_id})
     await db.likes.delete_many({'tweet_id': tweet_id})
     await db.retweets.delete_many({'tweet_id': tweet_id})
+    return {'deleted': True}
+
+
+# ------------- direct messages -------------
+
+MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024  # ~4MB per attachment (base64 inflates ~33%)
+MAX_TOTAL_MESSAGE_BYTES = 8 * 1024 * 1024
+
+
+def _conv_key(a: str, b: str) -> list:
+    """Canonical sorted participants list for stable conversation lookup."""
+    return sorted([a, b])
+
+
+async def _can_dm(sender: dict, recipient: dict) -> tuple[bool, str]:
+    """Returns (allowed, reason). Followers-only privacy: sender must be followed by recipient."""
+    if sender['id'] == recipient['id']:
+        return False, 'cannot_dm_self'
+    if recipient.get('banned'):
+        return False, 'recipient_banned'
+    privacy = recipient.get('dm_privacy', 'everyone')
+    if privacy == 'everyone':
+        return True, ''
+    # followers-only: the recipient must be following the sender (i.e. sender has recipient as a follower)
+    follow_doc = await db.follows.find_one({'follower_id': recipient['id'], 'following_id': sender['id']})
+    if follow_doc:
+        return True, ''
+    return False, 'dm_restricted_to_followers'
+
+
+def _serialize_message(m: dict) -> dict:
+    return {
+        'id': m['id'],
+        'conversation_id': m['conversation_id'],
+        'sender_id': m['sender_id'],
+        'content': m.get('content', ''),
+        'attachments': m.get('attachments', []),
+        'created_at': m['created_at'],
+        'read_by': m.get('read_by', []),
+    }
+
+
+async def _serialize_conversation(conv: dict, me_id: str) -> dict:
+    other_id = next((p for p in conv['participants'] if p != me_id), None)
+    other = await db.users.find_one({'id': other_id}) if other_id else None
+    unread = await db.messages.count_documents({
+        'conversation_id': conv['id'],
+        'sender_id': {'$ne': me_id},
+        'read_by': {'$ne': me_id},
+    })
+    return {
+        'id': conv['id'],
+        'peer': public_user(other, me_id) if other else None,
+        'last_message_at': conv.get('last_message_at'),
+        'last_message_preview': conv.get('last_message_preview', ''),
+        'last_sender_id': conv.get('last_sender_id'),
+        'unread_count': unread,
+    }
+
+
+@api.get('/messages/conversations')
+async def list_conversations(user=Depends(current_user)):
+    cur = db.conversations.find({'participants': user['id']}).sort([('last_message_at', -1)]).limit(100)
+    items = await cur.to_list(100)
+    return [await _serialize_conversation(c, user['id']) for c in items]
+
+
+@api.get('/messages/unread-count')
+async def messages_unread_count(user=Depends(current_user)):
+    convs = await db.conversations.find({'participants': user['id']}, {'id': 1}).to_list(500)
+    if not convs:
+        return {'count': 0}
+    conv_ids = [c['id'] for c in convs]
+    count = await db.messages.count_documents({
+        'conversation_id': {'$in': conv_ids},
+        'sender_id': {'$ne': user['id']},
+        'read_by': {'$ne': user['id']},
+    })
+    return {'count': count}
+
+
+@api.post('/messages/conversations')
+async def start_conversation(payload: ConversationStart, user=Depends(current_user)):
+    target = await db.users.find_one({'username': payload.username})
+    if not target:
+        raise HTTPException(404, 'user_not_found')
+    allowed, reason = await _can_dm(user, target)
+    # Allow opening the conversation UI even if restricted, so the user can see the explanation.
+    # The actual block happens on send.
+    parts = _conv_key(user['id'], target['id'])
+    existing = await db.conversations.find_one({'participants': parts})
+    if existing:
+        conv = existing
+    else:
+        conv = {
+            'id': new_id(),
+            'participants': parts,
+            'created_at': now_utc(),
+            'last_message_at': now_utc(),
+            'last_message_preview': '',
+            'last_sender_id': None,
+        }
+        await db.conversations.insert_one(conv)
+    return {
+        **(await _serialize_conversation(conv, user['id'])),
+        'can_send': allowed,
+        'block_reason': reason if not allowed else None,
+    }
+
+
+@api.get('/messages/conversations/{conv_id}')
+async def get_conversation(conv_id: str, before: Optional[str] = None, limit: int = 50, user=Depends(current_user)):
+    conv = await db.conversations.find_one({'id': conv_id})
+    if not conv or user['id'] not in conv['participants']:
+        raise HTTPException(404, 'conversation_not_found')
+    q = {'conversation_id': conv_id}
+    if before:
+        before_msg = await db.messages.find_one({'id': before})
+        if before_msg:
+            q['created_at'] = {'$lt': before_msg['created_at']}
+    cur = db.messages.find(q).sort([('created_at', -1)]).limit(min(limit, 100))
+    msgs = await cur.to_list(min(limit, 100))
+    msgs.reverse()  # chronological
+
+    # peer info + can_send check
+    other_id = next((p for p in conv['participants'] if p != user['id']), None)
+    other = await db.users.find_one({'id': other_id}) if other_id else None
+    allowed, reason = (True, '')
+    if other:
+        allowed, reason = await _can_dm(user, other)
+
+    return {
+        'id': conv['id'],
+        'peer': public_user(other, user['id']) if other else None,
+        'messages': [_serialize_message(m) for m in msgs],
+        'can_send': allowed,
+        'block_reason': reason if not allowed else None,
+    }
+
+
+@api.post('/messages/conversations/{conv_id}')
+async def send_message(conv_id: str, payload: MessageCreate, user=Depends(current_user)):
+    conv = await db.conversations.find_one({'id': conv_id})
+    if not conv or user['id'] not in conv['participants']:
+        raise HTTPException(404, 'conversation_not_found')
+    other_id = next((p for p in conv['participants'] if p != user['id']), None)
+    other = await db.users.find_one({'id': other_id}) if other_id else None
+    if not other:
+        raise HTTPException(404, 'recipient_not_found')
+    allowed, reason = await _can_dm(user, other)
+    if not allowed:
+        raise HTTPException(403, reason or 'dm_blocked')
+
+    content = (payload.content or '').strip()
+    attachments = [a.model_dump() for a in payload.attachments]
+    if not content and not attachments:
+        raise HTTPException(400, 'empty_message')
+
+    # Validate attachment sizes (base64 data URLs)
+    total = len(content)
+    for a in attachments:
+        url = a.get('url', '') or ''
+        size = len(url)
+        if size > MAX_ATTACHMENT_BYTES * 2:  # base64 is ~1.33x; allow some headroom
+            raise HTTPException(413, 'attachment_too_large')
+        total += size
+    if total > MAX_TOTAL_MESSAGE_BYTES * 2:
+        raise HTTPException(413, 'message_too_large')
+
+    now = now_utc()
+    msg = {
+        'id': new_id(),
+        'conversation_id': conv_id,
+        'sender_id': user['id'],
+        'content': content,
+        'attachments': attachments,
+        'created_at': now,
+        'read_by': [user['id']],
+    }
+    await db.messages.insert_one(msg)
+
+    preview = content[:80] if content else (f"[{attachments[0].get('type','file')}]" if attachments else '')
+    await db.conversations.update_one(
+        {'id': conv_id},
+        {'$set': {
+            'last_message_at': now,
+            'last_message_preview': preview,
+            'last_sender_id': user['id'],
+        }},
+    )
+    return _serialize_message(msg)
+
+
+@api.post('/messages/conversations/{conv_id}/read')
+async def mark_conversation_read(conv_id: str, user=Depends(current_user)):
+    conv = await db.conversations.find_one({'id': conv_id})
+    if not conv or user['id'] not in conv['participants']:
+        raise HTTPException(404, 'conversation_not_found')
+    await db.messages.update_many(
+        {'conversation_id': conv_id, 'read_by': {'$ne': user['id']}},
+        {'$addToSet': {'read_by': user['id']}},
+    )
+    return {'ok': True}
+
+
+@api.delete('/messages/conversations/{conv_id}')
+async def delete_conversation(conv_id: str, user=Depends(current_user)):
+    """Hides conversation from the user (soft delete). Also deletes messages if no participants remain."""
+    conv = await db.conversations.find_one({'id': conv_id})
+    if not conv or user['id'] not in conv['participants']:
+        raise HTTPException(404, 'conversation_not_found')
+    remaining = [p for p in conv['participants'] if p != user['id']]
+    if remaining:
+        # Keep conversation but mark hidden for this user via a 'hidden_for' array
+        await db.conversations.update_one(
+            {'id': conv_id},
+            {'$set': {'participants': remaining}, '$addToSet': {'hidden_for': user['id']}}
+        )
+    else:
+        await db.conversations.delete_one({'id': conv_id})
+        await db.messages.delete_many({'conversation_id': conv_id})
     return {'deleted': True}
 
 
