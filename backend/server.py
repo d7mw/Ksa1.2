@@ -751,7 +751,8 @@ async def user_tweets(username: str, kind: str = 'posts', user=Depends(optional_
 
     # Private-account gate: only owner / admin / followers can see posts
     if not await can_view_user_posts(u, viewer_id):
-        return {'private': True, 'tweets': []} if False else []  # return empty list, but frontend will detect via user.is_private
+        # Return empty list; frontend detects privacy via user.is_private on the profile response.
+        return []
     return await _user_tweets_payload(u, kind, viewer_id)
 
 
